@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken'
 import multer from 'multer'
 import axios from 'axios'
 import * as cheerio from 'cheerio'
+import { mineUrlRecursively } from './miner.js'
 import { query, execute } from './db.js'
 
 const app = express()
@@ -79,7 +80,38 @@ const authenticateToken = (req, res, next) => {
     })
 }
 
-// --- Ontology APIs ---
+// --- Public Registry APIs ---
+
+app.get('/api/registry', async (req, res) => {
+    try {
+        const ontologies = await query(`
+            SELECT o.*, u.username as owner_name 
+            FROM ontologies o
+            LEFT JOIN users u ON o.user_id = u.id
+            ORDER BY o.id DESC
+        `)
+        for (let i = 0; i < ontologies.length; i++) {
+            const words = await query('SELECT COUNT(*) as count FROM words WHERE ontology_id = ?', [ontologies[i].id])
+            ontologies[i].termCount = words[0].count
+        }
+        res.json(ontologies)
+    } catch (error) {
+        console.error('Error fetching registry:', error)
+        res.status(500).json({ error: 'Internal server error' })
+    }
+})
+
+app.get('/api/registry/:ontologyId/words', async (req, res) => {
+    const { ontologyId } = req.params
+    try {
+        const words = await query('SELECT * FROM words WHERE ontology_id = ?', [ontologyId])
+        res.json(words)
+    } catch (error) {
+        res.status(500).json({ error: 'Internal server error' })
+    }
+})
+
+// --- Private User Ontology APIs ---
 
 app.get('/api/ontologies', authenticateToken, async (req, res) => {
     try {
@@ -144,174 +176,7 @@ app.post('/api/ontologies/mine', authenticateToken, async (req, res) => {
     }
 
     try {
-        const response = await axios.get(url, { headers: { 'Accept': 'text/html, text/markdown, text/plain, */*' } })
-        const contentType = response.headers['content-type'] || ''
-        const content = response.data
-
-        const extractedWords = []
-
-        // Stage 3: NLP Normalization Helpers
-        const normalizeTerm = (term) => term.replace(/[:\-]$/g, '').trim()
-        const extractSemantics = (def) => {
-            if (/property|attribute|relation/i.test(def)) return 'Property'
-            if (/individual|instance|example/i.test(def)) return 'Individual'
-            return 'Class'
-        }
-
-        const extractFromMarkdown = (mdContent) => {
-            const lines = mdContent.split('\n')
-            let currentWord = null
-
-            for (let line of lines) {
-                line = line.trim()
-                const termMatch = line.match(/^(?:#{2,6}|\*+|- \*\*)\s*([^:\*]+)/)
-                if (termMatch && line.length < 150) {
-                    if (currentWord && currentWord.term) {
-                        extractedWords.push(currentWord)
-                    }
-                    currentWord = { term: normalizeTerm(termMatch[1]), definition: '', related: [], type: 'Class' }
-                    const colIdx = line.indexOf(':')
-                    if (colIdx !== -1 && colIdx > 2) {
-                        currentWord.definition = line.substring(colIdx + 1).replace(/\*+/g, '').trim() + ' '
-                    }
-                } else if (currentWord && line.startsWith('> ')) {
-                    currentWord.definition += line.replace('> ', '').trim() + ' '
-                } else if (currentWord && line.match(/^(relaties|gerelateerd|see also|related|related terms):/i)) {
-                    const relatedText = line.replace(/^(relaties|gerelateerd|see also|related|related terms):/i, '').trim()
-                    const links = Array.from(relatedText.matchAll(/\[([^\]]+)\]/g))
-                    if (links.length > 0) {
-                        links.forEach(m => currentWord.related.push(m[1].trim()))
-                    } else {
-                        currentWord.related.push(...relatedText.split(',').map(s => s.trim()))
-                    }
-                } else if (currentWord && line.length > 0 && !line.match(/^(Toelichting|Bron|Alternatieve aanduiding|Voorbeeld|Extensie|Concept):/i)) {
-                    if (!line.startsWith('[')) {
-                        currentWord.definition += line + ' '
-                    }
-                }
-            }
-            if (currentWord && currentWord.term) {
-                extractedWords.push(currentWord)
-            }
-        }
-
-        if (contentType.includes('text/html')) {
-            // Stage 1 & 2: HTML DOM Extraction
-            const $ = cheerio.load(content)
-
-            // Strategy: ReSpec W3C data-include markdown files (Common in Dutch Govt Standards)
-            const includeElements = $('[data-include$=".md"]')
-            if (includeElements.length > 0) {
-                const baseUrl = new URL(url)
-                for (let i = 0; i < includeElements.length; i++) {
-                    const includePath = $(includeElements[i]).attr('data-include')
-                    const fullIncludeUrl = new URL(includePath, baseUrl).href
-                    try {
-                        const mdRes = await axios.get(fullIncludeUrl, { headers: { 'Accept': 'text/markdown, text/plain, */*' } })
-                        if (mdRes.data) {
-                            extractFromMarkdown(mdRes.data)
-                        }
-                    } catch (e) { console.error('Failed fetching include', fullIncludeUrl) }
-                }
-            }
-
-            // Clean DOM
-            $('script, style, nav, footer, header').remove()
-
-            // Strategy A: <dl> <dt> <dd>
-            let currentTerm = null
-            $('dl').children().each((_, el) => {
-                if (el.tagName === 'dt') {
-                    currentTerm = normalizeTerm($(el).text())
-                } else if (el.tagName === 'dd' && currentTerm) {
-                    const definition = $(el).text().trim()
-                    if (definition) {
-                        extractedWords.push({ term: currentTerm, definition, related: [], type: extractSemantics(definition) })
-                    }
-                    currentTerm = null
-                }
-            })
-
-            // Strategy B: Tables with headers or generic 2-col tables
-            $('table').each((_, table) => {
-                const headers = []
-                $(table).find('th, thead td').each((i, th) => headers.push($(th).text().trim().toLowerCase()))
-
-                let termIdx = headers.findIndex(h => h.includes('term') || h.includes('concept') || h.includes('name') || h.includes('begrip'))
-                let defIdx = headers.findIndex(h => h.includes('definition') || h.includes('description') || h.includes('meaning') || h.includes('definitie') || h.includes('omschrijving') || h.includes('uitleg'))
-
-                if (termIdx === -1 || defIdx === -1) {
-                    const firstRow = $(table).find('tr').first()
-                    const cells = firstRow.find('td, th')
-                    if (cells.length >= 2) {
-                        termIdx = 0
-                        defIdx = 1
-                    }
-                }
-
-                if (termIdx !== -1 && defIdx !== -1) {
-                    $(table).find('tbody tr, tr').each((_, tr) => {
-                        const cells = $(tr).find('td')
-                        if (cells.length > Math.max(termIdx, defIdx)) {
-                            const term = normalizeTerm($(cells[termIdx]).text())
-                            const definition = $(cells[defIdx]).text().trim()
-                            if (term && definition && term.length < 100) {
-                                let type = extractSemantics(definition)
-                                if (cells.length > 2) type = extractSemantics($(cells[2]).text()) || type
-                                extractedWords.push({ term, definition, related: [], type })
-                            }
-                        }
-                    })
-                }
-            })
-
-            // Strategy C: Any headers followed by text
-            $('h1, h2, h3, h4, h5, h6').each((_, heading) => {
-                const termText = $(heading).text().trim()
-                if (termText && termText.length < 80 && termText.split(' ').length < 8) {
-                    let nextEl = $(heading).next()
-                    let definition = ''
-                    while (nextEl.length && !nextEl.is('h1, h2, h3, h4, h5, h6')) {
-                        if (nextEl.is('p') || nextEl.is('div') || nextEl.is('span')) {
-                            definition += nextEl.text().trim() + ' '
-                        }
-                        nextEl = nextEl.next()
-                    }
-                    if (definition.trim()) {
-                        extractedWords.push({ term: normalizeTerm(termText), definition: definition.trim(), related: [], type: extractSemantics(definition) })
-                    }
-                }
-            })
-
-            // Strategy D: Paragraphs or lists starting with bold terms (e.g. <strong>Term:</strong> definition)
-            $('p, li, div').each((_, el) => {
-                const strongEl = $(el).find('strong, b').first()
-                if (strongEl.length > 0) {
-                    const strongText = strongEl.text().trim()
-                    const fullText = $(el).text().trim()
-                    if (strongText && fullText.startsWith(strongText) && strongText.length < 60 && strongText.split(' ').length < 6) {
-                        let definition = fullText.substring(strongText.length).replace(/^[:\-]/, '').trim()
-                        if (definition && definition.length > 10) {
-                            extractedWords.push({ term: normalizeTerm(strongText), definition: definition, related: [], type: extractSemantics(definition) })
-                        }
-                    }
-                }
-            })
-
-        } else {
-            // Plaintext / Markdown heuristic
-            extractFromMarkdown(content)
-        }
-
-        // De-duplicate extracted words by term (simple normalization)
-        const uniqueWordsMap = new Map()
-        for (const w of extractedWords) {
-            const lowTerm = w.term.toLowerCase()
-            if (!uniqueWordsMap.has(lowTerm)) {
-                uniqueWordsMap.set(lowTerm, w)
-            }
-        }
-        const finalWords = Array.from(uniqueWordsMap.values())
+        const finalWords = await mineUrlRecursively(url)
 
         if (finalWords.length === 0) {
             return res.status(400).json({ error: 'Could not extract any concepts from the provided URL. The HTML structure might not look like a glossary or definition list.' })

@@ -321,13 +321,119 @@ function ResultsView({ searchQuery, setSearchQuery, handleSearch, results, loadi
   )
 }
 
+import React, { useEffect, Fragment } from 'react'
+
 function RegistryView() {
-  const sources = [
-    { name: "W3C Semantic Sensor Network", type: "GitHub Repo", status: "Indexed", lastSync: "10 mins ago", terms: 1042 },
-    { name: "Financial Industry Business Ontology", type: "SPARQL Endpoint", status: "Syncing...", lastSync: "In Progress", terms: 8400 },
-    { name: "Schema.org Core", type: "JSON-LD", status: "Indexed", lastSync: "1 hour ago", terms: 1205 },
-    { name: "Custom Enterprise Internal", type: "RDF Upload", status: "Validating SHACL", lastSync: "Just now", terms: 45 }
-  ]
+  const [sources, setSources] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [selectedOntology, setSelectedOntology] = useState(null)
+  const [previewWords, setPreviewWords] = useState([])
+  const [selectedWord, setSelectedWord] = useState(null)
+
+  useEffect(() => {
+    fetch('http://localhost:3001/api/registry')
+      .then(res => res.json())
+      .then(data => {
+        setSources(data)
+        setLoading(false)
+      })
+      .catch(err => {
+        console.error('Failed to fetch registry', err)
+        setLoading(false)
+      })
+  }, [])
+
+  const handleSelect = async (ontology) => {
+    setSelectedOntology(ontology)
+    setSelectedWord(null) // Reset on new view
+    try {
+      const res = await fetch(`http://localhost:3001/api/registry/${ontology.id}/words`)
+      const data = await res.json()
+      setPreviewWords(data)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  if (selectedOntology) {
+    return (
+      <div className="container animate-fade-in" style={{ paddingTop: '2rem' }}>
+        <button className="btn btn-secondary" style={{ marginBottom: '2rem' }} onClick={() => setSelectedOntology(null)}>
+          &larr; Back to Registry
+        </button>
+        <div className="glass-panel" style={{ marginBottom: '2rem' }}>
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="h2">{selectedOntology.name}</h2>
+              <p className="text-muted" style={{ marginTop: '0.5rem' }}>{selectedOntology.description}</p>
+            </div>
+            <div className="text-right">
+              <span className="badge badge-primary">{selectedOntology.source_type}</span>
+              <p className="text-sm text-muted" style={{ marginTop: '0.5rem' }}>Owned by: <User size={12} style={{ display: 'inline' }} /> {selectedOntology.owner_name}</p>
+            </div>
+          </div>
+        </div>
+
+        <h3 className="h3" style={{ marginBottom: '1rem' }}>Extracted Definitions ({previewWords.length})</h3>
+        <div className="glass-panel" style={{ padding: 0 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead>
+              <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border-subtle)' }}>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)' }}>Term</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)' }}>Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              {previewWords.map((word) => (
+                <Fragment key={word.id}>
+                  <tr
+                    style={{
+                      borderBottom: selectedWord?.id === word.id ? 'none' : '1px solid var(--border-subtle)',
+                      cursor: 'pointer',
+                      background: selectedWord?.id === word.id ? 'rgba(255,255,255,0.04)' : 'transparent'
+                    }}
+                    className="hover:bg-opacity-50"
+                    onClick={() => setSelectedWord(selectedWord?.id === word.id ? null : word)}
+                  >
+                    <td style={{ padding: '1rem 1.5rem', fontWeight: 500 }}>
+                      <span style={{ display: 'inline-block', width: '20px', transition: 'transform 0.2s', transform: selectedWord?.id === word.id ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
+                      {word.term}
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem' }}>
+                      <span className="badge badge-outline">{word.type}</span>
+                    </td>
+                  </tr>
+                  {selectedWord?.id === word.id && (
+                    <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td colSpan="2" style={{ padding: '0 1.5rem 2rem 3.5rem' }}>
+                        <div style={{ marginBottom: '1.5rem' }}>
+                          <h4 className="text-sm font-semibold text-muted uppercase tracking-wider" style={{ marginBottom: '0.5rem' }}>Definition</h4>
+                          <p style={{ lineHeight: 1.6, color: 'var(--text-primary)' }}>{word.definition || 'No definition provided.'}</p>
+                        </div>
+                        {word.related_terms && (
+                          <div>
+                            <h4 className="text-sm font-semibold text-muted uppercase tracking-wider" style={{ marginBottom: '0.5rem' }}>Tags / Related</h4>
+                            <div className="flex gap-2 flex-wrap">
+                              {word.related_terms.split(',').map((tag, idx) => (
+                                <span key={idx} className="badge badge-secondary" style={{ fontSize: '0.8rem' }}>{tag.trim()}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+              {previewWords.length === 0 && (
+                <tr><td colSpan="2" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>No terms extracted yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="container animate-fade-in" style={{ paddingTop: '2rem' }}>
@@ -343,51 +449,53 @@ function RegistryView() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginBottom: '3rem' }}>
         <div className="glass-panel stat-card">
-          <div className="stat-value">1,248</div>
+          <div className="stat-value">{sources.length}</div>
           <div className="stat-label">Registered Ontologies</div>
         </div>
         <div className="glass-panel stat-card">
-          <div className="stat-value text-gradient">42.8M</div>
+          <div className="stat-value text-gradient">{sources.reduce((acc, curr) => acc + (curr.termCount || 0), 0)}</div>
           <div className="stat-label">Indexed Terms</div>
         </div>
         <div className="glass-panel stat-card">
-          <div className="stat-value" style={{ color: 'var(--accent-success)' }}>98.2%</div>
+          <div className="stat-value" style={{ color: 'var(--accent-success)' }}>100%</div>
           <div className="stat-label">Crawl Success Rate</div>
         </div>
       </div>
 
       <div className="glass-panel" style={{ padding: '0' }}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)' }}>
-          <h3 className="h3">Recent Ingestion Jobs</h3>
+          <h3 className="h3">Public Ingestion Nodes</h3>
         </div>
 
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border-subtle)' }}>
-              <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Source / Target</th>
+              <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Source Name</th>
               <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Type</th>
+              <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Owner</th>
               <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Terms Extracted</th>
-              <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Status</th>
-              <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Last Sync</th>
             </tr>
           </thead>
           <tbody>
-            {sources.map((src, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s' }} className="hover:bg-opacity-50">
-                <td style={{ padding: '1rem 1.5rem', fontWeight: 500 }}>{src.name}</td>
+            {loading && <tr><td colSpan="5" style={{ padding: '2rem', textAlign: 'center' }}>Loading ecosystem registry...</td></tr>}
+            {!loading && sources.map((src) => (
+              <tr
+                key={src.id}
+                style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s', cursor: 'pointer' }}
+                className="hover:bg-opacity-50"
+                onClick={() => handleSelect(src)}
+              >
+                <td style={{ padding: '1rem 1.5rem', fontWeight: 500, color: 'var(--accent-primary)' }}>{src.name}</td>
                 <td style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)' }}>
-                  <span className="badge badge-outline">{src.type}</span>
+                  <span className="badge badge-outline">{src.source_type}</span>
                 </td>
-                <td style={{ padding: '1rem 1.5rem', fontFamily: 'var(--font-mono)' }}>{src.terms.toLocaleString()}</td>
-                <td style={{ padding: '1rem 1.5rem' }}>
-                  <span className={`flex items-center gap-2 text-sm ${src.status === 'Indexed' ? 'text-green-400' : 'text-yellow-400'}`}>
-                    <Activity size={14} className={src.status === 'Syncing...' ? 'animate-pulse' : ''} />
-                    {src.status}
-                  </span>
-                </td>
-                <td style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)' }}>{src.lastSync}</td>
+                <td style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)' }}><User size={14} style={{ display: 'inline-block', marginRight: '4px' }} />{src.owner_name}</td>
+                <td style={{ padding: '1rem 1.5rem', fontFamily: 'var(--font-mono)' }}>{(src.termCount || 0).toLocaleString()}</td>
               </tr>
             ))}
+            {!loading && sources.length === 0 && (
+              <tr><td colSpan="4" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>No ontologies registered yet.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
