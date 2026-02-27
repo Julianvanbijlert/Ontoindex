@@ -1,0 +1,86 @@
+# Ontology Management Dashboard Walkthrough
+
+The Ontology Management application now has full dynamic authentication and backend connections for managing ontologies and words.
+
+## Changes Made
+
+### 1. Express & SQLite Backend
+- Created a robust Express.js backend API running on `http://localhost:3001`.
+- Built an embedded SQLite database ([database.sqlite](file:///C:/Users/julia/.gemini/antigravity/scratch/ontoindex/server/database.sqlite)) with tables for `users`, `ontologies`, and `words`.
+- Created secure endpoints:
+  - **Authentication**: `POST /api/auth/register` and `POST /api/auth/login` (with JWT & bcrypt hashing).
+  - **Ontology Operations**: `GET`, `POST`, `PUT`, `DELETE` operations for entire ontologies.
+  - **File Upload Mock**: `POST /api/ontologies/upload` to handle Mock Excel and Word processing using Multer.
+  - **Word Operations**: `GET`, `POST`, `PUT`, `DELETE` operations for terms linked to specific ontologies.
+
+### 2. Frontend React Client
+- **Authentication Gateway ([AuthViews.jsx](file:///C:/Users/julia/.gemini/antigravity/scratch/ontoindex/src/components/AuthViews.jsx))**: Built a polished, dual-mode Login and Account Creation interface that connects directly to the backend API via HTTP [fetch](file:///C:/Users/julia/.gemini/antigravity/scratch/ontoindex/src/components/DashboardView.jsx#44-56) and issues local JWT tokens.
+- **Ontology Dashboard ([DashboardView.jsx](file:///C:/Users/julia/.gemini/antigravity/scratch/ontoindex/src/components/DashboardView.jsx))**: Designed a completely new protected view:
+  - Users can list all top-level ontologies natively from the SQLite Database.
+  - Users can click "Upload / Add Ontology" to upload an `.xlsx` or `.docx` file, which simulates extracting conceptual definitions and inserting them into the database.
+  - Users can dive into specific ontologies to fetch terms, displaying an interactive table.
+  - Full CRUD control inside the table allowed inserting new Terms (Classes, Properties, or Individuals), editing terms inline, or deleting them permanently.
+- **Advanced URL Extraction Pipeline (Miner)**:
+  - Users can provide an arbitrary HTTP/HTTPS URL (e.g. from `modellen.jenvgegevens.nl`) and the backend will execute a multi-stage semantic extraction.
+  - **Stage 1 & 2 (Clean DOM & Heuristics)**: Uses `cheerio` to parse standard HTML, removing `nav`/`style`/`script` bloat, and explicitly hunting for `<dl>/<dt>/<dd>` definition lists, Term/Definition HTML `<table/>` rows, and `<h2>`/`<h3>` siblings.
+  - **Stage 3 (Normalization)**: Auto-trims words, strips trailing punctuation, normalizes cases, and derives basic semantic bounds (Class vs Property designations).
+  - Extracted properties are instantly inserted into the database and reviewable in the Dashboard.
+- **JSON-LD Semantic Export**:
+  - The Dashboard features an "Export JSON-LD" system.
+  - Each extracted ontology compiles into standard W3C Semantic Web JSON-LD format matching words to `owl:Class` or `owl:DatatypeProperty` and serializing dictionary strings to `rdfs:label` / `rdfs:comment`.
+
+## Advanced Feature: Recursive Headless Web Mining 🕸️
+
+To support modern JavaScript-heavy documentation sites and connected sidebars, the original scraping engine was completely refactored into a **Breadth-First-Search knowledge crawler**! 
+
+Using the `puppeteer` framework, the `POST /api/ontologies/mine` endpoint now operates entirely headlessly:
+1.  **JavaScript Evaluation**: The Backend spins up a Chromium browser context, visits the target URL, and waits for all JS/React scripts to render before looking for Definitions.
+2.  **Navigation Target Mapping**: It scrapes the page for all `<nav>`, `<aside>`, and standard `<a>` hyperlink nodes that share the *same domain* as the root URL.
+3.  **Graph Traversal Loop**: It queues these links and "spider crawls" through them recursively (up to 5 deep nested pages per mine).
+4.  **Aggregate De-Duplication**: At every page step, it uses the Universal Parsing Engine to extract glossaries, consolidates all of them in-memory, removes duplicates, and saves them to your Dashboard as a massive aggregated Concept Dictionary!
+- **Dynamic User-Specific Search Engine**:
+  - The "Search" functionality on the landing page is now connected directly to the user's uploaded domains via the new `/api/search` endpoint.
+  - Users *must* log in to execute a search.
+  - Queries match against the `term` or `definition` inside the user's specific vocabulary, completely dynamically replacing the static mock data.
+
+## Public Federated Registry UI 🌐
+
+The "Registry" navigation tab now displays a live, read-only ecosystem view of all data crawled and indexed by any user across the application. 
+
+This is powered by two new public Unauthenticated endpoints:
+- `GET /api/registry`: Gathers every ontology in the database and joins it with the `users` table to display who crawled it, alongside the total term count. 
+- `GET /api/registry/:id/words`: When a user clicks any row in the Registry table, it triggers this endpoint to fetch all associated Definitions.
+
+The Frontend [RegistryView](file:///C:/Users/julia/.gemini/antigravity/scratch/ontoindex/src/App.jsx#326-505) was updated to drop the mock static variables and use `useEffect` hooks to dynamically map over the live SQLite data. Clicking an ontology expands it into a beautiful Detail Table allowing you to preview the Extracted terms!
+
+Each extracted term operates as an expandable Accordion row. Clicking a standalone Term slides open its detailed **Definition** and associated **Tags/Related Terms**.
+
+![Federated Registry List View](C:\Users\julia\.gemini\antigravity\brain\16bc8b08-00ae-4365-a8c5-2248044690c9\registry.png)
+![Registry Details View](C:\Users\julia\.gemini\antigravity\brain\16bc8b08-00ae-4365-a8c5-2248044690c9\registry_detail.png)
+![Registry Term Expanded View](C:\Users\julia\.gemini\antigravity\brain\16bc8b08-00ae-4365-a8c5-2248044690c9\registry_term_expanded.png)
+- **Main App Integration ([App.jsx](file:///C:/Users/julia/.gemini/antigravity/scratch/ontoindex/src/App.jsx))**: Implemented simple token retrieval and state management. When a user logs in, the navigation dynamically transforms to include a "Dashboard" button.
+
+## Verification & Usage Instructions
+
+### Running the App Locally
+
+1. **Start the Backend Node Server**
+```bash
+cd .\scratch\ontoindex\server\
+npm run start
+```
+
+2. **Start the Frontend Vite Client**
+```bash
+cd .\scratch\ontoindex\
+npm run dev
+```
+
+### Try it out!
+
+1. Open your browser to the localhost port provided by Vite.
+2. Click **Sign In** and then select **Create Account**.
+3. Create a username and password (hashed automatically).
+4. After signing in, navigate to the **Dashboard**.
+5. Test the **Upload / Add Ontology** feature by adding a name and mock description, selecting the type of file mock if you desire.
+6. Click the newly created Ontology block, and experiment with editing vocabulary terms natively on the web.
