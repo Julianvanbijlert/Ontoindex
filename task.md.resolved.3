@@ -1,0 +1,22 @@
+# OntoIndex Prototype Task List
+
+- [x] Project Setup
+  - [x] Initialize Vite + React project
+  - [x] Install and configure Tailwind CSS
+  - [x] Install Lucide React for icons
+  - [x] Setup base CSS styles (fonts, modern UI tokens)
+- [x] Core Layout & Infrastructure
+  - [x] Global Sidebar navigation
+  - [x] Global Top Search bar
+  - [x] Routing/State management for views
+- [x] View Implementation
+  - [x] Search View (Exact/Semantic toggle, Filters, Results list)
+  - [x] Concept Detail View (Definition, Relations, Procedures, History tabs)
+  - [x] Review Queue View (Table, Side-by-side diff drawer)
+  - [x] Conflict & Comparison Pattern
+  - [x] Imports View (Source cards, Item promotion)
+  - [x] Analytics View (Dashboards, Charts placeholder)
+- [x] Mock Data & Polish
+  - [x] Centralize mock data store
+  - [x] Add micro-interactions and transitions
+  - [x] Ensure Linear/Notion-like modern aesthetics

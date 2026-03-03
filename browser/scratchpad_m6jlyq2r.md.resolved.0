@@ -1,0 +1,18 @@
+# Task: Explore ontoindex React App
+
+## Checklist
+- [ ] Open http://localhost:5173
+- [ ] Navigate through Sidebar:
+    - [ ] Concepts
+    - [ ] Review Queue
+    - [ ] Imports
+    - [ ] Analytics
+- [ ] Go to Search
+- [ ] Click on "Customer Legal Entity" to open detail view
+- [ ] Explore tabs in detail view
+- [ ] Capture look and feel
+- [ ] Final summary
+
+## Notes
+- App is running on localhost:5173
+- Using React with Tailwind CSS and Lucide icons.
