@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta viewport="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Informatiemodel voor het Gegevenskwaliteitsbeleid" />
+    <title>Informatiemodel voor het Gegevenskwaliteitsbeleid</title>
+    <script src="localbiblio.js" class="remove"></script>
+    <script src="postprocess.js" class="remove"></script>
+    <script class="remove">
+      // All config options at https://respec.org/docs/
+      var respecConfig = {
+        maxAge: 60000,  /* 1 minute of caching */
+        localBiblio: localBiblio,
+        specStatus: "base",
+        overrideStatus: true,
+        shortName: "gegevenskwaliteitsbeleid",
+        subtitle: "vastgestelde versie 1.0.1",
+        publishDate: "2025-07-28",
+        latestVersion: "https://modellen.jenvgegevens.nl/gegevenskwaliteitsbeleid/",
+        thisVersion: "https://modellen.jenvgegevens.nl/gegevenskwaliteitsbeleid/v101",
+        previousPublishDate: "2025-05-15",
+        previousMaturity: "LC",
+        prevRecURI: "https://modellen.jenvgegevens.nl/gegevensdelingsbeleid/v100",
+        licenses: {
+          cc0: {
+            name: "Creative Commons 0 Public Domain Dedication",
+            short: "CC0",
+            url: "https://creativecommons.org/publicdomain/zero/1.0/",
+            image: "https://tools.geostandaarden.nl/respec/style/logos/CC-Licentie.svg"
+          },
+          "cc-by": {
+            "name": "Creative Commons Attribution 4.0 International Public License",
+            "short": "CC-BY",
+            "url": "https://creativecommons.org/licenses/by/4.0/legalcode",
+            "image": "https://tools.geostandaarden.nl/respec/style/logos/cc-by.svg"
+          },
+          "cc-by-nd": {
+            "name": "Creative Commons Naamsvermelding-GeenAfgeleideWerken 4.0 Internationaal",
+            "short": "CC-BY-ND",
+            "url": "https://creativecommons.org/licenses/by-nd/4.0/legalcode.nl",
+            "image": "https://tools.geostandaarden.nl/respec/style/logos/cc-by-nd.svg"
+          }
+        },        
+        authors: [
+          { name: "CDO Office"}
+        ],
+        editors: [
+          {
+            name:       "David van der Horst",
+            company:    "Ministerie van Justitie en Veiligheid",
+            companyURL: "https://minjenv.nl"
+          },
+          {
+            name:       "Mohamed El Kouri",
+            company:    "Ministerie van Justitie en Veiligheid",
+            companyURL: "https://minjenv.nl"
+          },          
+          {
+            name:       "Ronald Kunenborg",
+            company:    "Ministerie van Justitie en Veiligheid",
+            companyURL: "https://minjenv.nl"
+          },
+        ],
+        lint: false,
+        postProcess: [markupDefTables],
+      };
+    </script>
+    <script src="https://www.w3.org/Tools/respec/respec-w3c" class="remove" defer></script>
+    <script defer>
+      // Override the "Latest Recommendation" text in dt element
+      // This is a workaround for the fact that the l10n key is not applied to this document but only works inside the W3C Respec context.
+      // Also, we can't use any of the other actual Respec features here, so we have to do it manually.
+      (function overrideRecommendationLabel() {
+        function doReplace() {
+          document.querySelectorAll("dt").forEach(dt => {
+            const txt = dt.textContent.trim();
+            if (txt === "Latest Recommendation:") {
+              dt.textContent = "Vorige versie:";
+              console.log("✔️ Overrode Latest Recommendation");
+            }
+          });
+        }
+        // If the page is already fully loaded, run immediately
+        if (document.readyState === "complete") {
+          doReplace();
+        } else {
+          // Otherwise wait for load
+          window.addEventListener("load", doReplace);
+        }
+        // Also try to run after 500ms, in case the page is not fully loaded yet (needed to catch a simple refresh)
+        setTimeout(doReplace, 500);
+
+        // Note: do not rely on the document.respec.ready (https://github.com/speced/respec/wiki/document.respec) to fire, it doesn't work.
+      })();
+    </script>
+  </head>
+  <body>
+    <p class="copyright" />
+    <section id="abstract" data-format="markdown" data-include-format="text" data-include="samenvatting.md"></section>
+    <section data-include-format="markdown" data-include="introductie.md"></section>
+    <section data-include-format="markdown" data-include="begrippenkader-gegevenskwaliteitsbeleid.md"></section>
+    <section data-include-format="markdown" data-include="gegevenskwaliteitsbeleid-mim.md"></section>
+    <section data-include-format="markdown" data-include="logische-modellen.md"></section>
+
+    <section id="changes" data-include-format="markdown" data-include="changes.md" class="appendix"></section>
+    <section id="tof" class="appendix"></section>
+  </body>
+</html>
