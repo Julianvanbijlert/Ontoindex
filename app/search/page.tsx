@@ -41,40 +41,113 @@ function SearchPageContent() {
   const [searchMode, setSearchMode] = useState<'exact' | 'semantic'>('semantic')
   const [domainFilter, setDomainFilter] = useState('All domains')
   const [statusFilter, setStatusFilter] = useState<Status | 'all'>('all')
+  const [tagFilter, setTagFilter] = useState('All tags')
   const [showFilters, setShowFilters] = useState(false)
 
+  const tags = useMemo(() => {
+    const tagSet = new Set<string>()
+    concepts.forEach((concept) => concept.tags.forEach((tag) => tagSet.add(tag)))
+    return ['All tags', ...Array.from(tagSet).sort()]
+  }, [])
+
   const filteredConcepts = useMemo(() => {
-    return concepts.filter((concept) => {
-      // Query match
-      if (query) {
-        const searchTerms = query.toLowerCase()
-        const matchesQuery =
-          concept.term.toLowerCase().includes(searchTerms) ||
-          concept.shortDefinition.toLowerCase().includes(searchTerms) ||
-          concept.tags.some((tag) => tag.toLowerCase().includes(searchTerms))
-        if (!matchesQuery) return false
-      }
+    const normalize = (value: string) =>
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
 
-      // Domain filter
-      if (domainFilter !== 'All domains' && concept.domain !== domainFilter) {
-        return false
-      }
+    const getUniqueWords = (value: string) => {
+      const clean = normalize(value)
+      return new Set(clean.split(' ').filter(Boolean))
+    }
 
-      // Status filter
-      if (statusFilter !== 'all' && concept.status !== statusFilter) {
-        return false
-      }
+    const wordOverlap = (a: Set<string>, b: Set<string>) => {
+      let overlap = 0
+      a.forEach((word) => {
+        if (b.has(word)) overlap += 1
+      })
+      return overlap
+    }
 
-      return true
-    })
-  }, [query, domainFilter, statusFilter])
+    const getSemanticScore = (concept: (typeof concepts)[number], value: string) => {
+      const normalized = normalize(value)
+      if (!normalized) return 0
+
+      const queryWords = getUniqueWords(normalized)
+      const termWords = getUniqueWords(concept.term)
+      const shortDefWords = getUniqueWords(concept.shortDefinition)
+      const fullDefWords = getUniqueWords(concept.fullDefinition)
+      const tagsWords = getUniqueWords(concept.tags.join(' '))
+
+      let score = 0
+      if (concept.term.toLowerCase() === normalized) score += 80
+      if (concept.term.toLowerCase().includes(normalized)) score += 40
+      if (concept.shortDefinition.toLowerCase().includes(normalized)) score += 35
+      if (concept.fullDefinition.toLowerCase().includes(normalized)) score += 30
+      if (concept.tags.some((tag) => tag.toLowerCase().includes(normalized))) score += 20
+
+      score += wordOverlap(queryWords, termWords) * 12
+      score += wordOverlap(queryWords, shortDefWords) * 8
+      score += wordOverlap(queryWords, fullDefWords) * 6
+      score += wordOverlap(queryWords, tagsWords) * 5
+
+      const normalizedScore = Math.max(0, Math.min(100, Math.round(score)))
+      return normalizedScore
+    }
+
+    const isExactMatch = (concept: (typeof concepts)[number], value: string) => {
+      const normalized = value.toLowerCase().trim()
+      if (!normalized) return true
+      return (
+        concept.term.toLowerCase().includes(normalized) ||
+        concept.shortDefinition.toLowerCase().includes(normalized) ||
+        concept.fullDefinition.toLowerCase().includes(normalized) ||
+        concept.tags.some((tag) => tag.toLowerCase().includes(normalized))
+      )
+    }
+
+    const result = concepts
+      .map((concept) => {
+        const score = query
+          ? searchMode === 'exact'
+            ? isExactMatch(concept, query)
+              ? 1
+              : 0
+            : getSemanticScore(concept, query)
+          : 1
+        return { concept, score }
+      })
+      .filter(({ concept, score }) => {
+        if (score <= 0) return false
+
+        if (domainFilter !== 'All domains' && concept.domain !== domainFilter) return false
+        if (statusFilter !== 'all' && concept.status !== statusFilter) return false
+        if (tagFilter !== 'All tags' && !concept.tags.includes(tagFilter)) return false
+
+        if (query && searchMode === 'semantic') {
+          return score >= 15
+        }
+
+        return true
+      })
+
+    const sorted = result
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item)
+
+    return sorted
+  }, [query, domainFilter, statusFilter, tagFilter, searchMode])
 
   const clearFilters = () => {
     setDomainFilter('All domains')
     setStatusFilter('all')
+    setTagFilter('All tags')
   }
 
-  const hasActiveFilters = domainFilter !== 'All domains' || statusFilter !== 'all'
+  const hasActiveFilters =
+    domainFilter !== 'All domains' || statusFilter !== 'all' || tagFilter !== 'All tags'
 
   return (
     <AppShell title="Search">
@@ -137,7 +210,7 @@ function SearchPageContent() {
                 Filters
                 {hasActiveFilters && (
                   <Badge variant="secondary" className="ml-2 bg-primary/20 text-primary">
-                    {(domainFilter !== 'All domains' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)}
+                    {(domainFilter !== 'All domains' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (tagFilter !== 'All tags' ? 1 : 0)}
                   </Badge>
                 )}
               </Button>
@@ -147,7 +220,7 @@ function SearchPageContent() {
           {/* Filters */}
           {showFilters && (
             <Card>
-              <CardContent className="grid gap-4 p-4 sm:grid-cols-3">
+              <CardContent className="grid gap-4 p-4 sm:grid-cols-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Domain</label>
                   <Select value={domainFilter} onValueChange={setDomainFilter}>
@@ -181,7 +254,7 @@ function SearchPageContent() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
+                        <div className="space-y-2">
                   <label className="text-sm font-medium">Type</label>
                   <Select defaultValue="all">
                     <SelectTrigger>
@@ -195,16 +268,36 @@ function SearchPageContent() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Tag</label>
+                  <Select value={tagFilter} onValueChange={setTagFilter}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tags.map((tag) => (
+                        <SelectItem key={tag} value={tag}>
+                          {tag}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardContent>
             </Card>
           )}
         </div>
 
         {/* Results Count */}
-        <div className="mb-4 text-sm text-muted-foreground">
+        <div className="mb-2 text-sm text-muted-foreground">
           {filteredConcepts.length} result{filteredConcepts.length !== 1 ? 's' : ''}
           {query && ` for "${query}"`}
         </div>
+        {searchMode === 'semantic' && query && (
+          <div className="mb-4 rounded-md border border-border bg-muted/20 p-2 text-xs text-muted-foreground">
+            Semantic scoring boosts matches that are close to concept term and definitions.
+          </div>
+        )}
 
         {/* Results List */}
         <div className="space-y-3">
@@ -222,7 +315,7 @@ function SearchPageContent() {
               </CardContent>
             </Card>
           ) : (
-            filteredConcepts.map((concept) => (
+            filteredConcepts.map(({ concept, score }) => (
               <Link key={concept.id} href={`/concepts/${concept.id}`}>
                 <Card className="transition-colors hover:border-primary/50 hover:bg-secondary/50">
                   <CardContent className="p-4">
@@ -231,6 +324,11 @@ function SearchPageContent() {
                         <div className="mb-1 flex items-center gap-2">
                           <h3 className="font-semibold">{concept.term}</h3>
                           <StatusBadge status={concept.status} />
+                          {searchMode === 'semantic' && query && (
+                            <Badge variant="secondary" className="text-[10px] font-medium">
+                              Score {Math.max(1, score)}/100
+                            </Badge>
+                          )}
                         </div>
                         <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
                           {concept.shortDefinition}
