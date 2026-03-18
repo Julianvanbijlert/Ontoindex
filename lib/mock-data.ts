@@ -20,6 +20,7 @@ export interface Concept {
   systems: number
   tags: string[]
   relatedConcepts: { id: string; term: string; relation: string }[]
+  comments?: Comment[]
 }
 
 export interface WorkflowItem {
@@ -75,13 +76,26 @@ export interface User {
   avatar?: string
 }
 
-export const currentUser: User = {
-  id: 'u1',
-  name: 'Anna van Dijk',
-  email: 'a.vandijk@ministry.nl',
-  role: 'architect',
-  department: 'Enterprise Architecture',
-}
+export const users: User[] = [
+  {
+    id: 'u1',
+    name: 'Anna van Dijk',
+    email: 'a.vandijk@ministry.nl',
+    role: 'architect',
+    department: 'Enterprise Architecture',
+    avatar: 'https://i.pravatar.cc/150?u=a042581f4e29026704d',
+  },
+  {
+    id: 'u2',
+    name: 'Viewer',
+    email: 'viewer@ministry.nl',
+    role: 'employee',
+    department: 'General Staff',
+    avatar: 'https://i.pravatar.cc/150?u=a04258a2462d826712d',
+  }
+]
+
+export const currentUser: User = users[0]
 
 export const concepts: Concept[] = [
   {
@@ -233,6 +247,69 @@ export const concepts: Concept[] = [
       { id: 'c1', term: 'Customer Legal Entity', relation: 'may be' },
     ],
   },
+  {
+    id: 'c7',
+    term: 'Worker',
+    shortDefinition: 'An individual providing labor to the organization.',
+    fullDefinition: 'A worker is any person who performs labor for the organization, regardless of the specific contract type. This includes employees, contractors, and temporary staff.',
+    examples: ['Full-time employee', 'Freelance consultant'],
+    domain: 'Human Resources',
+    ontology: 'Arbeidsvoorwaarden',
+    status: 'approved',
+    owner: 'Tom Visser',
+    ownerRole: 'domain-owner',
+    lastUpdated: '2026-03-10',
+    procedures: 2,
+    policies: 3,
+    systems: 2,
+    tags: ['hr', 'personnel'],
+    relatedConcepts: [
+      { id: 'c9', term: 'Workercontract', relation: 'has contract' },
+    ],
+    comments: [],
+  },
+  {
+    id: 'c8',
+    term: 'Employee',
+    shortDefinition: 'Synonym for worker.',
+    fullDefinition: 'In our terminology, employee is synonymous with worker, though often used colloquially to refer strictly to those with internal permanent contracts.',
+    examples: [],
+    domain: 'Human Resources',
+    ontology: 'Arbeidsvoorwaarden',
+    status: 'deprecated',
+    owner: 'Tom Visser',
+    ownerRole: 'domain-owner',
+    lastUpdated: '2026-01-15',
+    procedures: 0,
+    policies: 0,
+    systems: 0,
+    tags: ['hr', 'synonym'],
+    relatedConcepts: [
+      { id: 'c7', term: 'Worker', relation: 'synonym of' },
+    ],
+    comments: [],
+  },
+  {
+    id: 'c9',
+    term: 'Workercontract',
+    shortDefinition: 'The legal agreement governing a worker\'s employment.',
+    fullDefinition: 'A workercontract (arbeidsovereenkomst) specifies the terms, conditions, and trial length of a worker\'s employment. The standard trial length is 2 months, but it can vary based on the specific collective agreement.',
+    examples: ['Permanent contract', 'Temporary 1-year contract'],
+    domain: 'Human Resources',
+    ontology: 'Arbeidsvoorwaarden',
+    status: 'approved',
+    owner: 'Tom Visser',
+    ownerRole: 'domain-owner',
+    lastUpdated: '2026-02-28',
+    procedures: 5,
+    policies: 2,
+    systems: 1,
+    tags: ['hr', 'contract', 'trial-length'],
+    relatedConcepts: [
+      { id: 'c7', term: 'Worker', relation: 'applies to' },
+    ],
+    comments: [],
+  },
 ]
 
 export const workflowItems: WorkflowItem[] = [
@@ -359,6 +436,16 @@ export const ontologies: Ontology[] = [
     lastUpdated: '2026-02-20',
     standard: 'MIM 2.0',
     description: 'Employee, organization, and workforce management concepts.',
+  },
+  {
+    id: 'o5',
+    name: 'Arbeidsvoorwaarden',
+    domain: 'Human Resources',
+    owner: 'Tom Visser',
+    conceptCount: 15,
+    lastUpdated: '2026-03-18',
+    standard: 'MIM 2.0',
+    description: 'Terms of employment and workforce definitions.',
   },
 ]
 

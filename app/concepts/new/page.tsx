@@ -18,27 +18,53 @@ import {
 } from '@/components/ui/select'
 import { domains, ontologies, statusOptions } from '@/lib/mock-data'
 
+import { domains, statusOptions } from '@/lib/mock-data'
+import { useAppContext } from '@/lib/app-context'
+
 export default function NewConceptPage() {
   const router = useRouter()
+  const { addConcept, ontologies, currentUser } = useAppContext()
+  
+  const [term, setTerm] = useState('')
+  const [shortDef, setShortDef] = useState('')
+  const [fullDef, setFullDef] = useState('')
+  const [examples, setExamples] = useState('')
+  const [domain, setDomain] = useState('')
+  const [ontologyId, setOntologyId] = useState('')
+  const [status, setStatus] = useState('draft')
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
 
-  const handleAddTag = () => {
-    if (tagInput.trim() && !tags.includes(tagInput.trim())) {
-      setTags([...tags, tagInput.trim()])
-      setTagInput('')
+  const handleCreate = () => {
+    if (!term || !shortDef || !domain || !ontologyId) {
+      alert('Please fill in all required fields')
+      return
     }
-  }
 
-  const handleRemoveTag = (tag: string) => {
-    setTags(tags.filter((t) => t !== tag))
-  }
+    const selectedOntology = ontologies.find(o => o.id === ontologyId)
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handleAddTag()
+    const newConcept = {
+      id: `c-new-${Date.now()}`,
+      term,
+      shortDefinition: shortDef,
+      fullDefinition: fullDef,
+      examples: examples.split('\n').filter(e => e.trim()),
+      domain,
+      ontology: selectedOntology?.name || 'Unknown',
+      status: status as any,
+      owner: currentUser?.name || 'Unknown',
+      ownerRole: currentUser?.role || 'employee' as any,
+      lastUpdated: new Date().toISOString().split('T')[0],
+      procedures: 0,
+      policies: 0,
+      systems: 0,
+      tags,
+      relatedConcepts: [],
+      comments: []
     }
+
+    addConcept(newConcept)
+    router.push(`/concepts/${newConcept.id}`)
   }
 
   return (
@@ -62,7 +88,7 @@ export default function NewConceptPage() {
               <label htmlFor="term" className="text-sm font-medium">
                 Term <span className="text-destructive">*</span>
               </label>
-              <Input id="term" placeholder="e.g., Customer Legal Entity" />
+              <Input id="term" placeholder="e.g., Customer Legal Entity" value={term} onChange={(e) => setTerm(e.target.value)} />
             </div>
 
             {/* Short Definition */}
@@ -74,6 +100,8 @@ export default function NewConceptPage() {
                 id="shortDef"
                 placeholder="A brief 1-2 sentence definition..."
                 className="min-h-[80px] resize-none"
+                value={shortDef}
+                onChange={(e) => setShortDef(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
                 This will appear in search results and previews.
@@ -89,6 +117,8 @@ export default function NewConceptPage() {
                 id="fullDef"
                 placeholder="A comprehensive definition with context and details..."
                 className="min-h-[120px]"
+                value={fullDef}
+                onChange={(e) => setFullDef(e.target.value)}
               />
             </div>
 
@@ -101,6 +131,8 @@ export default function NewConceptPage() {
                 id="examples"
                 placeholder="Enter examples, one per line..."
                 className="min-h-[80px]"
+                value={examples}
+                onChange={(e) => setExamples(e.target.value)}
               />
             </div>
 
@@ -110,14 +142,14 @@ export default function NewConceptPage() {
                 <label className="text-sm font-medium">
                   Domain <span className="text-destructive">*</span>
                 </label>
-                <Select>
+                <Select value={domain} onValueChange={setDomain}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select domain" />
                   </SelectTrigger>
                   <SelectContent>
-                    {domains.filter((d) => d !== 'All domains').map((domain) => (
-                      <SelectItem key={domain} value={domain}>
-                        {domain}
+                    {domains.filter((d) => d !== 'All domains').map((domainName) => (
+                      <SelectItem key={domainName} value={domainName}>
+                        {domainName}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -128,7 +160,7 @@ export default function NewConceptPage() {
                 <label className="text-sm font-medium">
                   Ontology <span className="text-destructive">*</span>
                 </label>
-                <Select>
+                <Select value={ontologyId} onValueChange={setOntologyId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select ontology" />
                   </SelectTrigger>
@@ -146,16 +178,13 @@ export default function NewConceptPage() {
             {/* Status */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Initial Status</label>
-              <Select defaultValue="draft">
+              <Select value={status} onValueChange={setStatus}>
                 <SelectTrigger className="w-[200px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {statusOptions.slice(0, 2).map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' ')}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="in-review">In Review</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
@@ -200,7 +229,7 @@ export default function NewConceptPage() {
               <Button variant="outline" onClick={() => router.back()}>
                 Cancel
               </Button>
-              <Button>Create Definition</Button>
+              <Button onClick={handleCreate}>Create Definition</Button>
             </div>
           </CardContent>
         </Card>

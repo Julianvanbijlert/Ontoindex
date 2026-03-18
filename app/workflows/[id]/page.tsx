@@ -39,29 +39,102 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { workflowItems, currentUser, type Status } from '@/lib/mock-data'
+import { useAppContext } from '@/lib/app-context'
 import { cn } from '@/lib/utils'
 
-const statusFlow: Status[] = ['draft', 'in-review', 'approved']
+const statusFlow: string[] = ['draft', 'in-review', 'approved']
 
 export default function WorkflowDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
   const router = useRouter()
-  const [note, setNote] = useState('')
-  const [status, setStatus] = useState<Status>('in-review')
-
-  const item = workflowItems.find((w) => w.id === resolvedParams.id)
+  const { workflows, concepts, updateWorkflow, updateConcept, currentUser } = useAppContext()
+  const [noteText, setNoteText] = useState('')
+  
+  const item = workflows.find((w) => w.id === resolvedParams.id)
+  const concept = concepts.find((c) => c.id === item?.conceptId)
 
   if (!item) {
     return (
       <AppShell>
         <div className="flex flex-col items-center justify-center py-12">
-          <h2 className="mb-2 text-lg font-semibold">Item not found</h2>
-          <p className="mb-4 text-muted-foreground">The workflow item does not exist.</p>
+          <h2 className="mb-2 text-lg font-semibold text-white">Item not found</h2>
+          <p className="mb-4 text-slate-400">The workflow item does not exist.</p>
           <Button onClick={() => router.push('/workflows')}>Back to Workflows</Button>
         </div>
       </AppShell>
     )
+  }
+
+  const handleAddNote = () => {
+    if (!noteText.trim()) return
+    const updated = {
+      ...item,
+      notes: [
+        ...item.notes,
+        {
+          id: `n-${Date.now()}`,
+          author: currentUser?.name || 'Anonymous',
+          authorRole: currentUser?.role || 'employee',
+          content: noteText,
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16)
+        }
+      ]
+    }
+    updateWorkflow(updated)
+    setNoteText('')
+  }
+
+  const handleApprove = () => {
+    // 1. Update workflow
+    const updatedWorkflow = {
+      ...item,
+      status: 'approved' as any,
+      notes: [
+        ...item.notes,
+        {
+          id: `n-app-${Date.now()}`,
+          author: currentUser?.name || 'Anonymous',
+          authorRole: currentUser?.role || 'employee',
+          content: 'Definition approved and finalized.',
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16)
+        }
+      ]
+    }
+    updateWorkflow(updatedWorkflow)
+
+    // 2. Update concept
+    if (concept) {
+      const updatedConcept = {
+        ...concept,
+        status: 'approved' as any,
+        shortDefinition: item.proposedVersion || concept.shortDefinition,
+        lastUpdated: new Date().toISOString().split('T')[0]
+      }
+      updateConcept(updatedConcept)
+    }
+
+    alert('Approved successfully!')
+    router.push('/workflows')
+  }
+
+  const handleReject = () => {
+    const updatedWorkflow = {
+      ...item,
+      status: 'rejected' as any,
+      notes: [
+        ...item.notes,
+        {
+          id: `n-rej-${Date.now()}`,
+          author: currentUser?.name || 'Anonymous',
+          authorRole: currentUser?.role || 'employee',
+          content: 'Definition rejected. Please review the notes.',
+          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16)
+        }
+      ]
+    }
+    updateWorkflow(updatedWorkflow)
+    alert('Rejected successfully!')
+    router.push('/workflows')
   }
 
   return (
@@ -196,20 +269,20 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
                   ))
                 )}
 
-                <div className="flex gap-3 border-t border-border pt-4">
+                <div className="flex gap-3 border-t border-slate-800/50 pt-4">
                   <Avatar className="h-8 w-8">
-                    <AvatarFallback className="text-xs">
-                      {currentUser.name.split(' ').map((w) => w[0]).join('')}
+                    <AvatarFallback className="text-xs bg-slate-800 text-slate-300">
+                      {currentUser?.name.split(' ').map((w) => w[0]).join('')}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 space-y-2">
                     <Textarea
                       placeholder="Add a note or annotation..."
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      className="min-h-[80px] resize-none"
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      className="min-h-[80px] resize-none border-slate-800 bg-slate-900/50 text-slate-200"
                     />
-                    <Button size="sm" disabled={!note.trim()}>
+                    <Button size="sm" disabled={!noteText.trim()} onClick={handleAddNote} className="bg-indigo-600 hover:bg-indigo-700">
                       <Send className="mr-2 h-4 w-4" />
                       Add Note
                     </Button>
@@ -221,46 +294,39 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
 
           {/* Sidebar Actions */}
           <div className="space-y-6">
-            {/* Status Control */}
-            <Card>
+            {/* Status Flow Visualization */}
+            <Card className="border-slate-800 bg-slate-900/40">
               <CardHeader>
-                <CardTitle className="text-base">Status</CardTitle>
+                <CardTitle className="text-base text-slate-200">Review Status</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Select value={status} onValueChange={(v) => setStatus(v as Status)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="draft">Draft</SelectItem>
-                    <SelectItem value="in-review">In Review</SelectItem>
-                    <SelectItem value="approved">Approved</SelectItem>
-                    <SelectItem value="rejected">Rejected</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Status Flow Visualization */}
                 <div className="flex items-center justify-between">
                   {statusFlow.map((s, i) => (
                     <div key={s} className="flex items-center">
                       <div
                         className={cn(
-                          'flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium',
-                          s === status
-                            ? 'bg-primary text-primary-foreground'
-                            : statusFlow.indexOf(status) > i
-                            ? 'bg-status-approved/20 text-status-approved'
-                            : 'bg-muted text-muted-foreground'
+                          'flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold transition-all',
+                          s === item.status
+                            ? 'bg-indigo-600 text-white ring-4 ring-indigo-500/20'
+                            : statusFlow.indexOf(item.status) > i
+                            ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/50'
+                            : 'bg-slate-800 text-slate-500 border border-slate-700'
                         )}
                       >
-                        {i + 1}
+                        {s === 'approved' ? <Check className="h-4 w-4" /> : i + 1}
                       </div>
                       {i < statusFlow.length - 1 && (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        <div className={cn(
+                          "h-px w-8 mx-1",
+                          statusFlow.indexOf(item.status) > i ? "bg-emerald-500/50" : "bg-slate-800"
+                        )} />
                       )}
                     </div>
                   ))}
                 </div>
+                <p className="text-center text-xs text-slate-500 font-medium uppercase tracking-widest pt-2">
+                  {item.status.replace('-', ' ')}
+                </p>
               </CardContent>
             </Card>
 
@@ -284,56 +350,56 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
             </Card>
 
             {/* Actions */}
-            <Card>
+            <Card className="border-indigo-500/20 bg-indigo-500/5">
               <CardHeader>
-                <CardTitle className="text-base">Actions</CardTitle>
+                <CardTitle className="text-base text-indigo-300">Review Actions</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
+              <CardContent className="space-y-3">
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button className="w-full bg-status-approved text-white hover:bg-status-approved/90">
+                    <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-900/20" disabled={item.status === 'approved'}>
                       <Check className="mr-2 h-4 w-4" />
-                      Approve
+                      Approve & Go Live
                     </Button>
                   </AlertDialogTrigger>
-                  <AlertDialogContent>
+                  <AlertDialogContent className="bg-slate-900 border-slate-800">
                     <AlertDialogHeader>
-                      <AlertDialogTitle>Approve this definition?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will approve the proposed changes and make them visible to all users.
+                      <AlertDialogTitle className="text-white">Finalize Approval?</AlertDialogTitle>
+                      <AlertDialogDescription className="text-slate-400">
+                        This will update the definition in the knowledge base. This action is recorded in the version history.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction className="bg-status-approved hover:bg-status-approved/90">
-                        Approve
+                      <AlertDialogCancel className="bg-slate-800 border-slate-700 text-slate-300">Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleApprove} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                        Confirm Approval
                       </AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
 
-                <Button variant="outline" className="w-full">
+                <Button variant="outline" className="w-full border-slate-700 text-slate-300 hover:bg-slate-800" onClick={() => setNoteText("Requesting more information about...")}>
                   <MessageSquare className="mr-2 h-4 w-4" />
                   Request Info
                 </Button>
 
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button variant="outline" className="w-full text-destructive hover:bg-destructive/10">
+                    <Button variant="ghost" className="w-full text-rose-400 hover:bg-rose-500/10 hover:text-rose-300" disabled={item.status === 'rejected'}>
                       <X className="mr-2 h-4 w-4" />
-                      Reject
+                      Reject Proposal
                     </Button>
                   </AlertDialogTrigger>
-                  <AlertDialogContent>
+                  <AlertDialogContent className="bg-slate-900 border-slate-800">
                     <AlertDialogHeader>
-                      <AlertDialogTitle>Reject this definition?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Please add a note explaining why this is being rejected before confirming.
+                      <AlertDialogTitle className="text-white">Reject this proposal?</AlertDialogTitle>
+                      <AlertDialogDescription className="text-slate-400">
+                        Please ensure you have added a note explaining the reasons for rejection.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction className="bg-destructive hover:bg-destructive/90">
+                      <AlertDialogCancel className="bg-slate-800 border-slate-700 text-slate-300">Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleReject} className="bg-rose-600 hover:bg-rose-700 text-white">
                         Reject
                       </AlertDialogAction>
                     </AlertDialogFooter>

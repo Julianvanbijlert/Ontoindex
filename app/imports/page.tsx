@@ -35,7 +35,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { importSources, ontologies } from '@/lib/mock-data'
+import { useAppContext } from '@/lib/app-context'
+import { Label } from '@/components/ui/label'
 
 const sourceIcons = {
   sharepoint: Database,
@@ -46,12 +47,25 @@ const sourceIcons = {
 }
 
 export default function ImportsPage() {
+  const { ontologies, imports } = useAppContext()
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [importStep, setImportStep] = useState(1)
+  const [fileName, setFileName] = useState<string | null>(null)
+  const [ontologyName, setOntologyName] = useState('')
+  const [ontologyDesc, setOntologyDesc] = useState('')
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setFileName(e.target.files[0].name)
+    }
+  }
 
   const resetImport = () => {
     setImportStep(1)
     setImportDialogOpen(false)
+    setFileName(null)
+    setOntologyName('')
+    setOntologyDesc('')
   }
 
   return (
@@ -80,50 +94,96 @@ export default function ImportsPage() {
                 <div className="space-y-4 py-4">
                   <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border p-8 transition-colors hover:border-primary/50">
                     <Upload className="mb-4 h-10 w-10 text-muted-foreground" />
-                    <p className="mb-2 text-sm font-medium">Drop files here or click to browse</p>
-                    <p className="text-xs text-muted-foreground">
-                      Supports CSV, JSON, Excel, and Word documents
-                    </p>
-                    <Input type="file" className="mt-4 w-auto" accept=".csv,.json,.xlsx,.docx" />
+                    {fileName ? (
+                      <div className="flex items-center gap-2 text-primary">
+                        <FileSpreadsheet className="h-5 w-5" />
+                        <span className="font-semibold">{fileName}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="mb-2 text-sm font-medium">Drop files here or click to browse</p>
+                        <p className="text-xs text-muted-foreground">
+                          Supports CSV, JSON, Excel, and Word documents
+                        </p>
+                      </>
+                    )}
+                    <Input 
+                      type="file" 
+                      className="mt-4 w-auto cursor-pointer" 
+                      accept=".csv,.json,.xlsx,.docx" 
+                      onChange={handleFileChange}
+                    />
                   </div>
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setImportDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={() => setImportStep(2)}>Continue</Button>
+                  <Button disabled={!fileName} onClick={() => setImportStep(2)}>Continue</Button>
                 </DialogFooter>
               </>
             )}
             {importStep === 2 && (
               <>
                 <DialogHeader>
-                  <DialogTitle>Configure Import</DialogTitle>
+                  <DialogTitle>Ontology Metadata</DialogTitle>
+                  <DialogDescription>
+                    Add details about the new ontology you are importing.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label>Ontology Name</Label>
+                    <Input 
+                      placeholder="e.g. Finance Domain Ontology" 
+                      value={ontologyName}
+                      onChange={(e) => setOntologyName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Input 
+                      placeholder="What is this ontology for?" 
+                      value={ontologyDesc}
+                      onChange={(e) => setOntologyDesc(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Standard</Label>
+                    <Select defaultValue="mim-2">
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mim-2">MIM 2.0</SelectItem>
+                        <SelectItem value="nl-sbb">NL-SBB</SelectItem>
+                        <SelectItem value="skos">SKOS</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setImportStep(1)}>
+                    Back
+                  </Button>
+                  <Button disabled={!ontologyName} onClick={() => setImportStep(3)}>Next</Button>
+                </DialogFooter>
+              </>
+            )}
+            {importStep === 3 && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Configure Mapping</DialogTitle>
                   <DialogDescription>
                     Map your data fields to OntoIndex concepts.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Target Ontology</label>
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select ontology" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ontologies.map((ont) => (
-                          <SelectItem key={ont.id} value={ont.id}>
-                            {ont.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
                   <div className="rounded-lg border border-border p-4">
-                    <p className="mb-3 text-sm font-medium">Field Mapping</p>
+                    <p className="mb-3 text-sm font-medium text-muted-foreground uppercase tracking-tight">Field Mapping</p>
                     <div className="space-y-3">
                       <div className="flex items-center gap-3">
-                        <span className="w-24 text-sm text-muted-foreground">Column A</span>
+                        <span className="w-24 text-sm font-medium">Column A</span>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         <Select defaultValue="term">
                           <SelectTrigger className="flex-1">
@@ -137,7 +197,7 @@ export default function ImportsPage() {
                         </Select>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="w-24 text-sm text-muted-foreground">Column B</span>
+                        <span className="w-24 text-sm font-medium">Column B</span>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                         <Select defaultValue="definition">
                           <SelectTrigger className="flex-1">
@@ -152,37 +212,37 @@ export default function ImportsPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="rounded-lg bg-secondary/50 p-4">
-                    <div className="flex items-center gap-2 text-sm">
-                      <File className="h-4 w-4" />
-                      <span className="font-medium">glossary_export.csv</span>
+                  <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/20 p-4">
+                    <div className="flex items-center gap-2 text-sm text-indigo-400">
+                      <FileSpreadsheet className="h-4 w-4" />
+                      <span className="font-medium">{fileName}</span>
                       <span className="text-muted-foreground">· 45 rows detected</span>
                     </div>
                   </div>
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setImportStep(1)}>
+                  <Button variant="outline" onClick={() => setImportStep(2)}>
                     Back
                   </Button>
-                  <Button onClick={() => setImportStep(3)}>Import</Button>
+                  <Button onClick={() => setImportStep(4)}>Request Approval & Upload</Button>
                 </DialogFooter>
               </>
             )}
-            {importStep === 3 && (
+            {importStep === 4 && (
               <>
                 <DialogHeader>
-                  <DialogTitle>Import Complete</DialogTitle>
+                  <DialogTitle>Upload Initiated</DialogTitle>
                   <DialogDescription>
-                    Your data has been imported successfully.
+                    The new ontology is being processed and approval has been requested.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col items-center py-8">
-                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-status-approved/20">
+                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-status-approved/20 animate-pulse">
                     <Check className="h-8 w-8 text-status-approved" />
                   </div>
-                  <p className="text-lg font-medium">45 concepts imported</p>
+                  <p className="text-lg font-medium">{ontologyName} Uploaded</p>
                   <p className="text-sm text-muted-foreground">
-                    All items have been added as drafts
+                    45 concepts pending architect review
                   </p>
                 </div>
                 <DialogFooter>
@@ -199,14 +259,14 @@ export default function ImportsPage() {
         <div className="grid gap-4 sm:grid-cols-3">
           <Card>
             <CardContent className="p-4">
-              <p className="text-2xl font-bold">{importSources.length}</p>
+              <p className="text-2xl font-bold">{imports.length}</p>
               <p className="text-sm text-muted-foreground">Connected Sources</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
               <p className="text-2xl font-bold">
-                {importSources.reduce((sum, s) => sum + s.itemsImported, 0)}
+                {imports.reduce((sum, s) => sum + s.itemsImported, 0)}
               </p>
               <p className="text-sm text-muted-foreground">Items Imported</p>
             </CardContent>
@@ -214,7 +274,7 @@ export default function ImportsPage() {
           <Card>
             <CardContent className="p-4">
               <p className="text-2xl font-bold text-status-draft">
-                {importSources.reduce((sum, s) => sum + s.draftConcepts, 0)}
+                {imports.reduce((sum, s) => sum + s.draftConcepts, 0)}
               </p>
               <p className="text-sm text-muted-foreground">Pending Review</p>
             </CardContent>
@@ -225,7 +285,7 @@ export default function ImportsPage() {
         <div>
           <h2 className="mb-4 text-lg font-semibold">Import Sources</h2>
           <div className="grid gap-4 sm:grid-cols-2">
-            {importSources.map((source) => {
+            {imports.map((source) => {
               const Icon = sourceIcons[source.type]
               return (
                 <Card key={source.id}>

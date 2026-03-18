@@ -30,10 +30,13 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from '@/components/ui/toggle-group'
-import { concepts, domains, statusOptions, type Status } from '@/lib/mock-data'
+import { domains, statusOptions, type Status } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
+import { useAppContext } from '@/lib/app-context'
+import { Star, StarOff } from 'lucide-react'
 
 function SearchPageContent() {
+  const { concepts, isFavourite, toggleFavourite } = useAppContext()
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('q') || ''
   
@@ -42,6 +45,7 @@ function SearchPageContent() {
   const [domainFilter, setDomainFilter] = useState('All domains')
   const [statusFilter, setStatusFilter] = useState<Status | 'all'>('all')
   const [tagFilter, setTagFilter] = useState('All tags')
+  const [favouritesOnly, setFavouritesOnly] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
 
   const tags = useMemo(() => {
@@ -125,6 +129,7 @@ function SearchPageContent() {
         if (domainFilter !== 'All domains' && concept.domain !== domainFilter) return false
         if (statusFilter !== 'all' && concept.status !== statusFilter) return false
         if (tagFilter !== 'All tags' && !concept.tags.includes(tagFilter)) return false
+        if (favouritesOnly && !isFavourite(concept.id)) return false
 
         if (query && searchMode === 'semantic') {
           return score >= 15
@@ -144,10 +149,11 @@ function SearchPageContent() {
     setDomainFilter('All domains')
     setStatusFilter('all')
     setTagFilter('All tags')
+    setFavouritesOnly(false)
   }
 
   const hasActiveFilters =
-    domainFilter !== 'All domains' || statusFilter !== 'all' || tagFilter !== 'All tags'
+    domainFilter !== 'All domains' || statusFilter !== 'all' || tagFilter !== 'All tags' || favouritesOnly
 
   return (
     <AppShell title="Search">
@@ -210,7 +216,7 @@ function SearchPageContent() {
                 Filters
                 {hasActiveFilters && (
                   <Badge variant="secondary" className="ml-2 bg-primary/20 text-primary">
-                    {(domainFilter !== 'All domains' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (tagFilter !== 'All tags' ? 1 : 0)}
+                    {(domainFilter !== 'All domains' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (tagFilter !== 'All tags' ? 1 : 0) + (favouritesOnly ? 1 : 0)}
                   </Badge>
                 )}
               </Button>
@@ -283,6 +289,17 @@ function SearchPageContent() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="flex items-center gap-2 pt-8">
+                   <Button 
+                    variant={favouritesOnly ? "default" : "outline"} 
+                    size="sm" 
+                    className="w-full"
+                    onClick={() => setFavouritesOnly(!favouritesOnly)}
+                   >
+                     <Star className={cn("mr-2 h-4 w-4", favouritesOnly && "fill-current")} />
+                     Favourites Only
+                   </Button>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -333,31 +350,23 @@ function SearchPageContent() {
                         <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">
                           {concept.shortDefinition}
                         </p>
-                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <BookOpen className="h-3 w-3" />
-                            {concept.domain}
-                          </span>
-                          {concept.procedures > 0 && (
-                            <Badge variant="secondary" className="gap-1 text-xs">
-                              <FileText className="h-3 w-3" />
-                              {concept.procedures} procedure{concept.procedures !== 1 ? 's' : ''}
-                            </Badge>
-                          )}
-                          {concept.policies > 0 && (
-                            <Badge variant="secondary" className="gap-1 text-xs">
-                              <FileText className="h-3 w-3" />
-                              {concept.policies} polic{concept.policies !== 1 ? 'ies' : 'y'}
-                            </Badge>
-                          )}
-                          {concept.systems > 0 && (
-                            <Badge variant="secondary" className="gap-1 text-xs">
-                              <Database className="h-3 w-3" />
-                              {concept.systems} system{concept.systems !== 1 ? 's' : ''}
-                            </Badge>
-                          )}
-                        </div>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          toggleFavourite(concept.id)
+                        }}
+                      >
+                        {isFavourite(concept.id) ? (
+                          <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
+                        ) : (
+                          <Star className="h-4 w-4" />
+                        )}
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>

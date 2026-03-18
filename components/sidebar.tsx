@@ -24,7 +24,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
-import { currentUser, workflowItems } from '@/lib/mock-data'
+import { useAppContext } from '@/lib/app-context'
+import { Heart, Star } from 'lucide-react'
 
 const navigation = [
   { name: 'Home', href: '/', icon: Home },
@@ -74,8 +75,17 @@ function getRoleLabel(role: string) {
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { currentUser, workflows, logout, ontologies, favourites } = useAppContext()
+  const router = useRouter()
 
-  return (
+  if (!currentUser) return null
+
+  const favOntologies = ontologies.filter(o => favourites.includes(o.id))
+
+  const handleLogout = () => {
+    logout()
+    router.push('/login')
+  }
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
@@ -90,6 +100,8 @@ export function Sidebar() {
         </div>
         {navigation.map((item) => {
           const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
+          const badgeCount = item.name === 'Workflows' ? workflows.length : undefined
+          
           return (
             <Link
               key={item.name}
@@ -103,14 +115,37 @@ export function Sidebar() {
             >
               <item.icon className="h-4 w-4" />
               {item.name}
-              {item.badge && (
+              {badgeCount !== undefined && badgeCount > 0 && (
                 <Badge variant="secondary" className="ml-auto h-5 min-w-5 justify-center bg-primary/20 text-primary text-xs">
-                  {item.badge}
+                  {badgeCount}
                 </Badge>
               )}
             </Link>
           )
         })}
+
+        {favOntologies.length > 0 && (
+          <>
+            <div className="mb-2 mt-6 px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Favourites
+            </div>
+            {favOntologies.map((ont) => (
+              <Link
+                key={ont.id}
+                href={`/ontologies/${ont.id}`}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  pathname === `/ontologies/${ont.id}`
+                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                )}
+              >
+                <Star className="h-4 w-4 text-amber-500" />
+                {ont.name}
+              </Link>
+            ))}
+          </>
+        )}
 
         {(currentUser.role === 'architect' || currentUser.role === 'admin') && (
           <>
@@ -167,7 +202,7 @@ export function Sidebar() {
               Settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem className="text-destructive" onClick={handleLogout}>
               <LogOut className="mr-2 h-4 w-4" />
               Log out
             </DropdownMenuItem>

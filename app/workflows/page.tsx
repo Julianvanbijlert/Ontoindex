@@ -32,10 +32,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { workflowItems, statusOptions, type Status } from '@/lib/mock-data'
+import { statusOptions, type Status } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
+import { useAppContext } from '@/lib/app-context'
 
-const changeTypeIcons = {
+const changeTypeIcons: Record<string, any> = {
   new: Plus,
   update: FileEdit,
   merge: GitMerge,
@@ -50,17 +51,19 @@ const changeTypeLabels = {
 }
 
 export default function WorkflowsPage() {
+  const { workflows } = useAppContext()
   const [statusFilter, setStatusFilter] = useState<Status | 'all'>('all')
   const [priorityFilter, setPriorityFilter] = useState<string>('all')
 
-  const filteredItems = workflowItems.filter((item) => {
+  const filteredItems = workflows.filter((item) => {
     if (statusFilter !== 'all' && item.status !== statusFilter) return false
     if (priorityFilter !== 'all' && item.priority !== priorityFilter) return false
     return true
   })
 
-  const pendingCount = workflowItems.filter((w) => w.status === 'in-review').length
-  const draftCount = workflowItems.filter((w) => w.status === 'draft').length
+  const pendingCount = workflows.filter((w) => w.status === 'in-review').length
+  const draftCount = workflows.filter((w) => w.status === 'draft').length
+  const highPriorityCount = workflows.filter((w) => w.priority === 'high').length
 
   return (
     <AppShell title="Workflow Inbox">
@@ -101,7 +104,7 @@ export default function WorkflowsPage() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
-                    {workflowItems.filter((w) => w.priority === 'high').length}
+                    {highPriorityCount}
                   </p>
                   <p className="text-sm text-muted-foreground">High Priority</p>
                 </div>
@@ -115,7 +118,7 @@ export default function WorkflowsPage() {
                   <GitMerge className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{workflowItems.length}</p>
+                  <p className="text-2xl font-bold">{workflows.length}</p>
                   <p className="text-sm text-muted-foreground">Total Items</p>
                 </div>
               </div>

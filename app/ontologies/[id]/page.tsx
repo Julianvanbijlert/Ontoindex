@@ -18,21 +18,39 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/status-badge'
-import { ontologies, concepts } from '@/lib/mock-data'
+import { useAppContext } from '@/lib/app-context'
+import { Star, Download } from 'lucide-react'
 
 export default function OntologyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
   const router = useRouter()
+  const { ontologies, concepts, isFavourite, toggleFavourite } = useAppContext()
 
   const ontology = ontologies.find((o) => o.id === resolvedParams.id)
   const ontologyConcepts = concepts.filter((c) => c.ontology === ontology?.name)
+
+  const handleExport = () => {
+    const data = {
+      ontology,
+      concepts: ontologyConcepts
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${ontology?.name.toLowerCase().replace(/\s+/g, '_')}_export.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
   if (!ontology) {
     return (
       <AppShell>
         <div className="flex flex-col items-center justify-center py-12">
-          <h2 className="mb-2 text-lg font-semibold">Ontology not found</h2>
-          <p className="mb-4 text-muted-foreground">The ontology does not exist.</p>
+          <h2 className="mb-2 text-lg font-semibold text-white">Ontology not found</h2>
+          <p className="mb-4 text-slate-400">The ontology does not exist.</p>
           <Button onClick={() => router.push('/ontologies')}>Back to Ontologies</Button>
         </div>
       </AppShell>
@@ -42,10 +60,16 @@ export default function OntologyDetailPage({ params }: { params: Promise<{ id: s
   return (
     <AppShell
       actions={
-        <Button variant="outline" size="sm">
-          <Edit className="mr-2 h-4 w-4" />
-          Edit Ontology
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => toggleFavourite(ontology.id)}>
+            <Star className={cn("mr-2 h-4 w-4", isFavourite(ontology.id) && "fill-amber-500 text-amber-500")} />
+            {isFavourite(ontology.id) ? "Favourited" : "Favourite"}
+          </Button>
+          <Button size="sm" onClick={handleExport} className="bg-indigo-600 hover:bg-indigo-700">
+            <Download className="mr-2 h-4 w-4" />
+            Export Entirety
+          </Button>
+        </div>
       }
     >
       <div className="mx-auto max-w-5xl">

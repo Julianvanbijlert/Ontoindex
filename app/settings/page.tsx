@@ -24,12 +24,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { currentUser } from '@/lib/mock-data'
+import { useAppContext } from '@/lib/app-context'
 
 export default function SettingsPage() {
+  const { currentUser, login, users } = useAppContext()
+  const [name, setName] = useState(currentUser?.name || '')
+  const [email, setEmail] = useState(currentUser?.email || '')
+  const [department, setDepartment] = useState(currentUser?.department || '')
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [workflowNotifications, setWorkflowNotifications] = useState(true)
   const [commentNotifications, setCommentNotifications] = useState(true)
+
+  if (!currentUser) return null
+
+  const handleSaveProfile = () => {
+    // In a real app we'd update context. For now it's mostly local state + feedback
+    alert('Profile updated (simulated)')
+  }
+
+  const handleRoleChange = (userId: string) => {
+    login(userId)
+  }
 
   return (
     <AppShell title="Settings">
@@ -57,63 +72,42 @@ export default function SettingsPage() {
                 <CardTitle className="text-base">Personal Information</CardTitle>
                 <CardDescription>Update your personal details</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Full Name</label>
-                    <Input defaultValue={currentUser.name} />
+                    <Input value={name} onChange={(e) => setName(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Email</label>
-                    <Input defaultValue={currentUser.email} type="email" />
+                    <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Department</label>
-                    <Input defaultValue={currentUser.department} />
+                    <Input value={department} onChange={(e) => setDepartment(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Role</label>
-                    <div className="flex h-9 items-center rounded-md border border-input bg-secondary px-3">
-                      <Badge className="bg-primary/20 text-primary">
-                        {currentUser.role.replace('-', ' ')}
-                      </Badge>
-                      <span className="ml-2 text-xs text-muted-foreground">
-                        Contact admin to change
-                      </span>
-                    </div>
+                    <label className="text-sm font-medium">Role (Simulate Switch)</label>
+                    <Select value={currentUser.id} onValueChange={handleRoleChange}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users.map(u => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name} ({u.role})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Building className="h-4 w-4" />
-                  Organization
-                </CardTitle>
-                <CardDescription>Your organization details</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Organization</span>
-                  <span className="font-medium">Ministry of Infrastructure</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">User ID</span>
-                  <span className="font-mono text-xs">{currentUser.id}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Member since</span>
-                  <span>January 2025</span>
                 </div>
               </CardContent>
             </Card>
 
             <div className="flex justify-end">
-              <Button>
+              <Button onClick={handleSaveProfile}>
                 <Save className="mr-2 h-4 w-4" />
                 Save Changes
               </Button>
@@ -185,21 +179,14 @@ export default function SettingsPage() {
                 <CardDescription>Customize the look and feel</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Color theme</label>
-                  <Select defaultValue="dark">
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="system">System</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Select your preferred color theme
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Dark Mode</p>
+                    <p className="text-sm text-muted-foreground">
+                      Toggle between light and dark themes
+                    </p>
+                  </div>
+                  <Switch checked={true} disabled />
                 </div>
               </CardContent>
             </Card>
