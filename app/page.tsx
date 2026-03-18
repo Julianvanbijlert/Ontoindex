@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -11,6 +11,8 @@ import {
   ArrowRight,
   Clock,
   TrendingUp,
+  History,
+  X,
 } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { Button } from '@/components/ui/button'
@@ -21,13 +23,50 @@ import { analyticsData, workflowItems, concepts } from '@/lib/mock-data'
 
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('')
+  const [isFocused, setIsFocused] = useState(false)
+  const [recentSearches, setRecentSearches] = useState<string[]>([])
   const router = useRouter()
+  const searchContainerRef = useRef<HTMLDivElement>(null)
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
+  useEffect(() => {
+    const saved = localStorage.getItem('recentSearches')
+    if (saved) {
+      try {
+        setRecentSearches(JSON.parse(saved))
+      } catch (e) {}
     }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setIsFocused(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleSearch = (e?: React.FormEvent, queryOverride?: string) => {
+    if (e) e.preventDefault()
+    const query = (queryOverride || searchQuery).trim()
+    if (query) {
+      const updated = [query, ...recentSearches.filter(s => s !== query)].slice(0, 5)
+      setRecentSearches(updated)
+      localStorage.setItem('recentSearches', JSON.stringify(updated))
+      
+      setIsFocused(false)
+      if (queryOverride) {
+        setSearchQuery(query)
+      }
+      router.push(`/search?q=${encodeURIComponent(query)}`)
+    }
+  }
+
+  const removeRecentSearch = (e: React.MouseEvent, searchToRemove: string) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const updated = recentSearches.filter(s => s !== searchToRemove)
+    setRecentSearches(updated)
+    localStorage.setItem('recentSearches', JSON.stringify(updated))
   }
 
   return (
@@ -44,18 +83,64 @@ export default function HomePage() {
         </div>
 
         {/* Main Search */}
-        <form onSubmit={handleSearch} className="mb-10">
-          <div className="relative mx-auto max-w-2xl">
-            <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search definitions, concepts, procedures..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-14 w-full rounded-xl bg-secondary pl-12 pr-4 text-base"
-            />
-          </div>
-        </form>
+        <div ref={searchContainerRef} className="group relative mx-auto mb-16 mt-8 max-w-3xl">
+          {/* Animated gradient glow effect behind the search bar */}
+          <div className="absolute -inset-1 rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 opacity-30 blur-lg transition duration-500 group-focus-within:opacity-100 group-hover:opacity-75"></div>
+          
+          <form onSubmit={handleSearch} className="relative z-10 rounded-2xl bg-card p-2 shadow-2xl ring-1 ring-border transition-all">
+            <div className="relative flex items-center">
+              <Search className="absolute left-5 h-6 w-6 text-indigo-500" />
+              <Input
+                type="search"
+                placeholder="Search definitions, concepts, procedures..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setIsFocused(true)}
+                className="h-16 w-full border-0 bg-transparent pl-16 pr-36 text-lg placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+              <Button 
+                type="submit" 
+                size="lg"
+                className="absolute right-2 h-12 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 font-semibold text-white shadow-md transition-all hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]"
+              >
+                Search <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </form>
+
+          {/* Recent Searches Dropdown */}
+          {isFocused && recentSearches.length > 0 && (
+            <div className="absolute left-0 right-0 top-full z-20 mt-3 overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-in fade-in slide-in-from-top-2">
+              <div className="bg-muted/50 px-5 py-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Recent Searches
+              </div>
+              <ul className="py-2">
+                {recentSearches.map((search, idx) => (
+                  <li key={idx}>
+                    <button
+                      type="button"
+                      onClick={() => handleSearch(undefined, search)}
+                      className="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-secondary/80 focus:bg-secondary/80 focus:outline-none"
+                    >
+                      <div className="flex items-center gap-3">
+                        <History className="h-4 w-4 text-indigo-500/70" />
+                        <span className="text-base font-medium">{search}</span>
+                      </div>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => removeRecentSearch(e, search)}
+                        className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
 
         {/* Quick Actions */}
         <div className="mb-10 grid gap-4 sm:grid-cols-3">
