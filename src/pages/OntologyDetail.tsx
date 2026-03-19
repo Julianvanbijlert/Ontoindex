@@ -15,7 +15,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { ImportDialog } from "@/components/shared/ImportDialog";
 import { ExportDialog } from "@/components/shared/ExportDialog";
-import { Plus, Network, Edit2, Save, X, Loader2, Upload, Download } from "lucide-react";
+import { Plus, Network, Edit2, Save, X, Loader2, Upload, Download, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -25,6 +25,20 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { getWorkflowNodeStyle, workflowStatusConfig } from "@/lib/workflow-status";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { deleteOntology } from "@/lib/entity-service";
+import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
+import { getRelationshipDisplayLabel } from "@/lib/relationship-service";
 
 export default function OntologyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -42,7 +56,9 @@ export default function OntologyDetail() {
   const [createDefOpen, setCreateDefOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [newDef, setNewDef] = useState({ title: "", description: "", content: "", example: "", priority: "normal" });
   const canEditContent = hasRole("admin") || hasRole("editor");
 
@@ -69,7 +85,7 @@ export default function OntologyDetail() {
       (d.relationships || []).forEach((r: any) => {
         graphEdges.push({
           id: r.id, source: r.source_id, target: r.target_id,
-          label: r.type.replace("_", " "),
+          label: getRelationshipDisplayLabel(r.type, r.label),
           style: { stroke: "hsl(var(--primary))" },
           labelStyle: { fontSize: 11, fill: "hsl(var(--muted-foreground))" },
         });
@@ -91,7 +107,24 @@ export default function OntologyDetail() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAll(); }, [id]);
+  useEffect(() => {
+    fetchAll();
+
+    return subscribeToAppDataChanges((detail) => {
+      if (!id) {
+        return;
+      }
+
+      if (
+        detail.entityId === id ||
+        detail.entityType === "definition" ||
+        detail.entityType === "relationship" ||
+        detail.entityType === "favorite"
+      ) {
+        fetchAll();
+      }
+    });
+  }, [id, user]);
 
   const handleSaveOntology = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
@@ -102,7 +135,12 @@ export default function OntologyDetail() {
       title: editData.title.trim(), description: editData.description.trim(), tags,
     }).eq("id", ontology.id);
     if (error) toast.error(error.message);
-    else { toast.success("Ontology updated"); setEditing(false); fetchAll(); }
+    else {
+      toast.success("Ontology updated");
+      setEditing(false);
+      emitAppDataChanged({ entityType: "ontology", action: "updated", entityId: ontology.id });
+      fetchAll();
+    }
     setSaving(false);
   };
 
@@ -125,9 +163,30 @@ export default function OntologyDetail() {
       toast.success("Definition created");
       setCreateDefOpen(false);
       setNewDef({ title: "", description: "", content: "", example: "", priority: "normal" });
+      emitAppDataChanged({ entityType: "definition", action: "created", entityId: data.id });
       fetchAll();
     }
     setCreating(false);
+  };
+
+  const handleDeleteOntology = async () => {
+    if (!ontology) {
+      return;
+    }
+
+    setDeleting(true);
+
+    try {
+      await deleteOntology(supabase, ontology.id);
+      emitAppDataChanged({ entityType: "ontology", action: "deleted", entityId: ontology.id });
+      toast.success("Ontology deleted");
+      navigate("/ontologies");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete ontology");
+    }
+
+    setDeleting(false);
+    setDeleteOpen(false);
   };
 
   if (loading) return (
@@ -159,6 +218,34 @@ export default function OntologyDetail() {
             <LikeButton entityId={ontology.id} entityType="ontology" isLiked={isFavorited} />
             {canEditContent && <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3 w-3 mr-1.5" />Import</Button>}
             <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}><Download className="h-3 w-3 mr-1.5" />Export</Button>
+            {canEditContent && (
+              <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
+                    <Trash2 className="h-3 w-3 mr-1.5" />Delete
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete ontology?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This permanently deletes the ontology, its definitions, relationships, likes, and linked notifications.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      onClick={handleDeleteOntology}
+                      disabled={deleting}
+                    >
+                      {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Delete ontology
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
             {editing ? (
               <div className="flex gap-2">
                 <Button variant="ghost" size="icon" onClick={() => setEditing(false)}><X className="h-4 w-4" /></Button>
@@ -296,7 +383,9 @@ export default function OntologyDetail() {
         onOpenChange={setImportOpen}
         ontologyId={ontology.id}
         ontologyTitle={ontology.title}
-        onImport={() => {
+        onImport={(result) => {
+          emitAppDataChanged({ entityType: "definition", action: "imported", entityId: ontology.id });
+          toast.success(`Imported ${result.imported} definitions into ${ontology.title}`);
           fetchAll();
           setImportOpen(false);
         }}

@@ -16,6 +16,7 @@ import { Network, Plus, Search, Loader2, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function Ontologies() {
   const { user, hasRole } = useAuth();
@@ -61,10 +62,17 @@ export default function Ontologies() {
       toast.success("Ontology created");
       setDialogOpen(false);
       setNewOnto({ title: "", description: "", tags: "" });
+      emitAppDataChanged({ entityType: "ontology", action: "created", entityId: data.id });
       fetchData();
     }
     setCreating(false);
   };
+
+  useEffect(() => {
+    return subscribeToAppDataChanges(() => {
+      fetchData();
+    });
+  }, [searchQuery, user]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

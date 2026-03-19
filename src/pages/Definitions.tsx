@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { BookOpen, Search, Eye, Network } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function Definitions() {
   const { user } = useAuth();
@@ -44,6 +45,12 @@ export default function Definitions() {
   };
 
   useEffect(() => { fetchData(); }, [statusFilter, ontologyFilter, searchQuery]);
+
+  useEffect(() => {
+    return subscribeToAppDataChanges(() => {
+      fetchData();
+    });
+  }, [statusFilter, ontologyFilter, searchQuery, user]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

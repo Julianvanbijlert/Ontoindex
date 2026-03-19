@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { toggleFavorite } from "@/lib/favorites-service";
+import { emitAppDataChanged } from "@/lib/entity-events";
 import { toast } from "sonner";
 
 interface LikeButtonProps {
@@ -48,6 +49,11 @@ export function LikeButton({ entityId, entityType, isLiked, likeCount, onToggle,
       setLiked(nextLiked);
       setCount(c => Math.max(0, c + (nextLiked ? 1 : -1)));
       onToggle?.(nextLiked);
+      emitAppDataChanged({
+        entityType: entityType === "ontology" ? "ontology" : "definition",
+        action: "updated",
+        entityId,
+      });
     }
 
     setLoading(false);

@@ -7,17 +7,11 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Check, CheckCheck, MessageSquare, Heart, GitPullRequest, Edit2 } from "lucide-react";
+import { Bell, Check, CheckCheck } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fetchNotifications, markAllNotificationsRead, markNotificationRead, type NotificationItem } from "@/lib/notification-service";
-
-const typeConfig: Record<string, { icon: React.ElementType; color: string }> = {
-  comment: { icon: MessageSquare, color: "text-primary" },
-  like: { icon: Heart, color: "text-destructive" },
-  approval: { icon: GitPullRequest, color: "text-warning" },
-  update: { icon: Edit2, color: "text-info" },
-};
+import { fetchNotifications, markAllNotificationsRead, markNotificationRead, notificationTypeConfig, type NotificationItem } from "@/lib/notification-service";
+import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function Notifications() {
   const { user } = useAuth();
@@ -32,17 +26,25 @@ export default function Notifications() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, [user]);
+  useEffect(() => {
+    fetchData();
+
+    return subscribeToAppDataChanges(() => {
+      fetchData();
+    });
+  }, [user]);
 
   const markRead = async (id: string) => {
     await markNotificationRead(supabase, id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    emitAppDataChanged({ entityType: "notification", action: "updated", entityId: id });
   };
 
   const markAllRead = async () => {
     if (!user) return;
     await markAllNotificationsRead(supabase, user.id);
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    emitAppDataChanged({ entityType: "notification", action: "updated" });
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -68,7 +70,7 @@ export default function Notifications() {
       ) : (
         <div className="space-y-2">
           {notifications.map(n => {
-            const config = typeConfig[n.type] || typeConfig.update;
+            const config = notificationTypeConfig[n.type] || notificationTypeConfig.definition_changed;
             const Icon = config.icon;
             return (
               <Card
@@ -86,6 +88,9 @@ export default function Notifications() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium text-foreground">{n.title}</p>
+                      <Badge variant="outline" className="text-[10px]">
+                        {config.label}
+                      </Badge>
                       {!n.is_read && <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{n.message}</p>

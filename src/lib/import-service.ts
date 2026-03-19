@@ -12,6 +12,8 @@ export interface ImportResult {
   imported: number;
   errors: string[];
   warnings: string[];
+  errorCount: number;
+  warningCount: number;
 }
 
 export interface ParsedImportRow {
@@ -39,6 +41,45 @@ export const SUPPORTED_IMPORT_COLUMNS = [
 
 const PRIORITIES = new Set<PriorityLevel>(["low", "normal", "high", "critical"]);
 const STATUSES = new Set<WorkflowStatus>(["draft", "in_review", "approved", "rejected", "archived"]);
+
+function normalizePriority(rawPriority: string) {
+  if (!rawPriority) {
+    return { priority: undefined, warning: null };
+  }
+
+  if (PRIORITIES.has(rawPriority as PriorityLevel)) {
+    return { priority: rawPriority as PriorityLevel, warning: null };
+  }
+
+  if (rawPriority === "medium") {
+    return {
+      priority: "normal" as const,
+      warning: `normalized priority "${rawPriority}" to "normal".`,
+    };
+  }
+
+  return { priority: undefined, warning: `used unsupported priority "${rawPriority}" and defaulted to normal.` };
+}
+
+function normalizeStatus(rawStatus: string) {
+  if (!rawStatus) {
+    return { status: undefined, warning: null };
+  }
+
+  const normalizedStatus = rawStatus.replace(/[\s-]+/g, "_");
+
+  if (STATUSES.has(normalizedStatus as WorkflowStatus)) {
+    return {
+      status: normalizedStatus as WorkflowStatus,
+      warning:
+        normalizedStatus === rawStatus
+          ? null
+          : `normalized status "${rawStatus}" to "${normalizedStatus.replace(/_/g, " ")}".`,
+    };
+  }
+
+  return { status: undefined, warning: `used unsupported status "${rawStatus}" and defaulted to draft.` };
+}
 
 function normalizeHeader(header: string) {
   return header.trim().toLowerCase().replace(/\s+/g, "_");
@@ -69,8 +110,10 @@ function mapRow(rawRow: Record<string, unknown>) {
   const description = String(normalized.description ?? "").trim();
   const content = String(normalized.content ?? normalized.context ?? "").trim();
   const example = String(normalized.example ?? "").trim();
-  const priority = String(normalized.priority ?? "").trim().toLowerCase();
-  const status = String(normalized.status ?? "").trim().toLowerCase();
+  const rawPriority = String(normalized.priority ?? "").trim().toLowerCase();
+  const rawStatus = String(normalized.status ?? "").trim().toLowerCase();
+  const { priority, warning: priorityWarning } = normalizePriority(rawPriority);
+  const { status, warning: statusWarning } = normalizeStatus(rawStatus);
 
   return {
     title,
@@ -78,10 +121,12 @@ function mapRow(rawRow: Record<string, unknown>) {
     content,
     example,
     tags: splitTags(normalized.tags ?? normalized.tag ?? []),
-    priority: PRIORITIES.has(priority as PriorityLevel) ? (priority as PriorityLevel) : undefined,
-    status: STATUSES.has(status as WorkflowStatus) ? (status as WorkflowStatus) : undefined,
-    rawPriority: priority,
-    rawStatus: status,
+    priority,
+    status,
+    rawPriority,
+    rawStatus,
+    priorityWarning,
+    statusWarning,
   };
 }
 
@@ -157,12 +202,12 @@ export async function parseImportFile(file: File) {
       return;
     }
 
-    if (mappedRow.rawPriority && !mappedRow.priority) {
-      warnings.push(`Row ${rowNumber} used unsupported priority "${mappedRow.rawPriority}" and defaulted to normal.`);
+    if (mappedRow.priorityWarning) {
+      warnings.push(`Row ${rowNumber} ${mappedRow.priorityWarning}`);
     }
 
-    if (mappedRow.rawStatus && !mappedRow.status) {
-      warnings.push(`Row ${rowNumber} used unsupported status "${mappedRow.rawStatus}" and defaulted to draft.`);
+    if (mappedRow.statusWarning) {
+      warnings.push(`Row ${rowNumber} ${mappedRow.statusWarning}`);
     }
 
     parsedRows.push({
@@ -191,6 +236,54 @@ export async function importDefinitionsToOntology(
   ontologyId: string,
   file: File,
 ) {
+  const createResult = (params: Pick<ImportResult, "success" | "imported" | "errors" | "warnings">): ImportResult => ({
+    ...params,
+    errorCount: params.errors.length,
+    warningCount: params.warnings.length,
+  });
+
+  const fallbackInsertRows = async (rows: ParsedImportRow[]) => {
+    const {
+      data: { user },
+      error: userError,
+    } = await client.auth.getUser();
+
+    if (userError) {
+      throw userError;
+    }
+
+    if (!user) {
+      throw new Error("Authentication required.");
+    }
+
+    const payload = rows.map((row) => ({
+      title: row.title,
+      description: row.description,
+      content: row.content,
+      example: row.example,
+      tags: row.tags,
+      priority: row.priority ?? "normal",
+      status: row.status ?? "draft",
+      ontology_id: ontologyId,
+      created_by: user.id,
+    }));
+
+    const { error } = await client.from("definitions").insert(payload);
+
+    if (error) {
+      throw error;
+    }
+
+    await client.from("activity_events").insert({
+      user_id: user.id,
+      action: "imported",
+      entity_type: "ontology",
+      entity_id: ontologyId,
+      entity_title: file.name,
+      details: { imported_count: rows.length, transport: "client-fallback" },
+    });
+  };
+
   try {
     const parsed = await parseImportFile(file);
     const { data, error } = await client.rpc("import_definitions_to_ontology", {
@@ -199,28 +292,42 @@ export async function importDefinitionsToOntology(
     });
 
     if (error) {
-      return {
+      if (/import_definitions_to_ontology/i.test(error.message) && /schema cache|could not find/i.test(error.message)) {
+        await fallbackInsertRows(parsed.rows);
+
+        return createResult({
+          success: true,
+          imported: parsed.rows.length,
+          errors: [],
+          warnings: [
+            ...parsed.warnings,
+            "The database import RPC was unavailable, so the import completed through the direct persistence fallback.",
+          ],
+        });
+      }
+
+      return createResult({
         success: false,
         imported: 0,
         errors: [error.message],
         warnings: parsed.warnings,
-      } satisfies ImportResult;
+      });
     }
 
     const rpcResult = (data || {}) as { importedCount?: number; warnings?: string[] };
 
-    return {
+    return createResult({
       success: true,
       imported: rpcResult.importedCount ?? parsed.rows.length,
       errors: [],
       warnings: [...parsed.warnings, ...(rpcResult.warnings || [])],
-    } satisfies ImportResult;
+    });
   } catch (error) {
-    return {
+    return createResult({
       success: false,
       imported: 0,
       errors: [error instanceof Error ? error.message : "Import failed."],
       warnings: [],
-    } satisfies ImportResult;
+    });
   }
 }

@@ -12,7 +12,7 @@ import { StatusBadge, PriorityBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
-import { Edit2, Save, X, Loader2, Send, Eye, Network } from "lucide-react";
+import { Edit2, Save, X, Loader2, Send, Eye, Network, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +21,19 @@ import type { TimelineEvent } from "@/components/shared/ActivityTimeline";
 import { CommentThread } from "@/components/shared/CommentThread";
 import { DefinitionRelationsSection } from "@/components/definition/DefinitionRelationsSection";
 import { DefinitionHistorySection } from "@/components/definition/DefinitionHistorySection";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { deleteDefinition } from "@/lib/entity-service";
+import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +50,8 @@ export default function DefinitionDetail() {
   const [isFavorited, setIsFavorited] = useState(false);
   const [approvalMsg, setApprovalMsg] = useState("");
   const [requesting, setRequesting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [relationshipsLoading, setRelationshipsLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -80,7 +95,23 @@ export default function DefinitionDetail() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAll(); }, [id]);
+  useEffect(() => {
+    fetchAll();
+
+    return subscribeToAppDataChanges((detail) => {
+      if (!id) {
+        return;
+      }
+
+      if (
+        detail.entityId === id ||
+        detail.entityType === "relationship" ||
+        detail.entityType === "favorite"
+      ) {
+        fetchAll();
+      }
+    });
+  }, [id, user]);
 
   const handleSave = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
@@ -105,6 +136,7 @@ export default function DefinitionDetail() {
       });
       toast.success("Definition updated");
       setEditing(false);
+      emitAppDataChanged({ entityType: "definition", action: "updated", entityId: definition.id });
       fetchAll();
     }
     setSaving(false);
@@ -121,9 +153,30 @@ export default function DefinitionDetail() {
       await supabase.from("definitions").update({ status: "in_review" as any }).eq("id", id);
       toast.success("Approval requested");
       setApprovalMsg("");
+      emitAppDataChanged({ entityType: "definition", action: "updated", entityId: id });
       fetchAll();
     } else toast.error(error.message);
     setRequesting(false);
+  };
+
+  const handleDeleteDefinition = async () => {
+    if (!definition) {
+      return;
+    }
+
+    setDeleting(true);
+
+    try {
+      await deleteDefinition(supabase, definition.id);
+      emitAppDataChanged({ entityType: "definition", action: "deleted", entityId: definition.id });
+      toast.success("Definition deleted");
+      navigate(definition.ontology_id ? `/ontologies/${definition.ontology_id}` : "/definitions");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete definition");
+    }
+
+    setDeleting(false);
+    setDeleteOpen(false);
   };
 
   // Build timeline events
@@ -188,9 +241,37 @@ export default function DefinitionDetail() {
                 </Button>
               </div>
             ) : canEditContent ? (
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                <Edit2 className="mr-2 h-3 w-3" />Edit
-              </Button>
+              <div className="flex items-center gap-2">
+                <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
+                      <Trash2 className="mr-2 h-3 w-3" />Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete definition?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently deletes the definition, its relationships, comments, favorites, and linked notifications.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={handleDeleteDefinition}
+                        disabled={deleting}
+                      >
+                        {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Delete definition
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                  <Edit2 className="mr-2 h-3 w-3" />Edit
+                </Button>
+              </div>
             ) : null}
           </>
         }

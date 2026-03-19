@@ -51,11 +51,6 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
     setProcessing(false);
   };
 
-  const handleImport = async () => {
-    if (!file) return;
-    await processFile(file);
-  };
-
   const reset = () => {
     setFile(null);
     setResult(null);
@@ -167,14 +162,19 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
                   {result.success ? `${result.imported} items imported successfully` : "Import failed"}
                 </span>
               </div>
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline">Imported: {result.imported}</Badge>
+                <Badge variant="outline">Warnings: {result.warningCount ?? result.warnings.length}</Badge>
+                <Badge variant="outline">Errors: {result.errorCount ?? result.errors.length}</Badge>
+              </div>
               {result.errors.map((e, i) => <p key={i} className="text-xs text-destructive">{e}</p>)}
               {result.warnings.map((w, i) => <p key={i} className="text-xs text-warning">{w}</p>)}
             </div>
           )}
 
-          <Button onClick={handleImport} className="w-full" disabled={!file || processing}>
-            {processing && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Import
+          <Button onClick={() => inputRef.current?.click()} className="w-full" disabled={processing}>
+            {processing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+            Choose file to import
           </Button>
         </div>
       </DialogContent>

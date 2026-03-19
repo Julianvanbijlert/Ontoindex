@@ -9,6 +9,7 @@ import { StatCard } from "@/components/shared/StatCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 interface Stats {
   definitions: number;
@@ -56,6 +57,10 @@ export default function Dashboard() {
       setLoading(false);
     };
     fetchData();
+
+    return subscribeToAppDataChanges(() => {
+      fetchData();
+    });
   }, [user]);
 
   const statCards = [

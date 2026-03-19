@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export function NotificationBell() {
   const { user } = useAuth();
@@ -26,7 +27,15 @@ export function NotificationBell() {
       return;
     }
 
-    fetchNotifications(supabase, user.id, 5).then(setNotifications);
+    const refreshNotifications = () => {
+      fetchNotifications(supabase, user.id, 5).then(setNotifications);
+    };
+
+    refreshNotifications();
+
+    return subscribeToAppDataChanges(() => {
+      refreshNotifications();
+    });
   }, [user]);
 
   const unreadCount = notifications.filter((notification) => !notification.is_read).length;
@@ -37,6 +46,7 @@ export function NotificationBell() {
       setNotifications((current) =>
         current.map((item) => (item.id === notification.id ? { ...item, is_read: true } : item)),
       );
+      emitAppDataChanged({ entityType: "notification", action: "updated", entityId: notification.id });
     }
 
     if (notification.link) {
@@ -51,6 +61,7 @@ export function NotificationBell() {
 
     await markAllNotificationsRead(supabase, user.id);
     setNotifications((current) => current.map((item) => ({ ...item, is_read: true })));
+    emitAppDataChanged({ entityType: "notification", action: "updated" });
   };
 
   return (

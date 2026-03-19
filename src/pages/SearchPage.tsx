@@ -23,6 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function SearchPage() {
   const { user } = useAuth();
@@ -109,6 +110,19 @@ export default function SearchPage() {
 
     performSearch();
   }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy]);
+
+  useEffect(() => {
+    return subscribeToAppDataChanges(() => {
+      fetchSearchOptions(supabase).then((options) => {
+        setOntologies(options.ontologies);
+        setAvailableTags(options.tags);
+      });
+
+      if (hasActiveSearch) {
+        performSearch();
+      }
+    });
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy, hasActiveSearch]);
 
   const handleSubmitSearch = async (explicitQuery?: string) => {
     const nextQuery = explicitQuery ?? query;

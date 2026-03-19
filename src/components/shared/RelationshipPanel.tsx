@@ -10,7 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { GitBranch, Plus, Trash2, Search, ArrowRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Constants } from "@/integrations/supabase/types";
+import { emitAppDataChanged } from "@/lib/entity-events";
+import {
+  buildRelationshipPayload,
+  CUSTOM_RELATION_TYPE,
+  formatRelationshipType,
+  getRelationshipDisplayLabel,
+  predefinedRelationshipTypes,
+} from "@/lib/relationship-service";
 
 interface Relationship {
   id: string;
@@ -29,8 +36,6 @@ interface RelationshipPanelProps {
   allowCreate?: boolean;
   onRelationClick?: (definitionId: string) => void;
 }
-
-const relationshipTypes = Constants.public.Enums.relationship_type;
 
 function getRelatedDefinition(relationship: Relationship, entityId: string) {
   if (relationship.source_id === entityId) {
@@ -68,7 +73,8 @@ export function RelationshipPanel({
   const [targetSearch, setTargetSearch] = useState("");
   const [targetResults, setTargetResults] = useState<any[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<any>(null);
-  const [relType, setRelType] = useState<string>(relationshipTypes[0]);
+  const [relType, setRelType] = useState<string>(predefinedRelationshipTypes[0]);
+  const [customRelationType, setCustomRelationType] = useState("");
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -87,19 +93,30 @@ export function RelationshipPanel({
 
   const handleCreate = async () => {
     if (!selectedTarget || !user) return;
+    if (relType === CUSTOM_RELATION_TYPE && !customRelationType.trim()) {
+      toast.error("Enter a custom relationship type.");
+      return;
+    }
+
     setCreating(true);
-    const { error } = await supabase.from("relationships").insert({
-      source_id: entityId,
-      target_id: selectedTarget.id,
-      type: relType as any,
-      created_by: user.id,
-    });
+    const { error } = await supabase.from("relationships").insert(
+      buildRelationshipPayload({
+        sourceId: entityId,
+        targetId: selectedTarget.id,
+        selectedType: relType as any,
+        customType: customRelationType,
+        createdBy: user.id,
+      }),
+    );
     if (error) toast.error(error.message);
     else {
       toast.success("Relationship added");
       setDialogOpen(false);
       setSelectedTarget(null);
       setTargetSearch("");
+      setCustomRelationType("");
+      setRelType(predefinedRelationshipTypes[0]);
+      emitAppDataChanged({ entityType: "relationship", action: "created", entityId: selectedTarget.id });
       onRefresh();
     }
     setCreating(false);
@@ -108,7 +125,10 @@ export function RelationshipPanel({
   const handleDelete = async (relId: string) => {
     const { error } = await supabase.from("relationships").delete().eq("id", relId);
     if (error) toast.error(error.message);
-    else onRefresh();
+    else {
+      emitAppDataChanged({ entityType: "relationship", action: "deleted", entityId: relId });
+      onRefresh();
+    }
   };
 
   return (
@@ -154,11 +174,19 @@ export function RelationshipPanel({
                   <Select value={relType} onValueChange={setRelType}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {relationshipTypes.map(t => (
-                        <SelectItem key={t} value={t}>{t.replace(/_/g, " ")}</SelectItem>
+                      {predefinedRelationshipTypes.map(t => (
+                        <SelectItem key={t} value={t}>{formatRelationshipType(t)}</SelectItem>
                       ))}
+                      <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
                     </SelectContent>
                   </Select>
+                  {relType === CUSTOM_RELATION_TYPE && (
+                    <Input
+                      placeholder="Enter a custom relation type"
+                      value={customRelationType}
+                      onChange={e => setCustomRelationType(e.target.value)}
+                    />
+                  )}
                 </div>
                 <Button onClick={handleCreate} className="w-full" disabled={!selectedTarget || creating}>
                   Add Relationship
@@ -193,7 +221,7 @@ export function RelationshipPanel({
                       <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{r.label?.trim() || r.type.replace(/_/g, " ")}</span>
+                          <span>{getRelationshipDisplayLabel(r.type, r.label)}</span>
                           <Badge variant="outline" className="text-[10px]">
                             {relatedDefinition.directionLabel}
                           </Badge>

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { Bell, Edit2, GitBranch, MessageSquare, RefreshCcw } from "lucide-react";
 
 import type { Database } from "@/integrations/supabase/types";
 
@@ -13,6 +14,20 @@ export interface NotificationItem {
   is_read: boolean | null;
   created_at: string;
 }
+
+export const notificationTypeConfig: Record<
+  string,
+  {
+    icon: typeof Bell;
+    label: string;
+    color: string;
+  }
+> = {
+  definition_changed: { icon: Edit2, label: "Definition changed", color: "text-info" },
+  definition_status_changed: { icon: RefreshCcw, label: "Definition status changed", color: "text-warning" },
+  ontology_changed: { icon: GitBranch, label: "Ontology changed", color: "text-accent" },
+  definition_comment: { icon: MessageSquare, label: "Definition comment", color: "text-primary" },
+};
 
 export async function fetchNotifications(client: AppSupabaseClient, userId: string, limit?: number) {
   let query = client

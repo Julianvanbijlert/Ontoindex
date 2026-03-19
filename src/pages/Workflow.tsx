@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { filterAndSortWorkflowRequests } from "@/lib/workflow-service";
+import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function Workflow() {
   const { user, hasRole } = useAuth();
@@ -54,6 +55,7 @@ export default function Workflow() {
         entity_title: requests.find(r => r.id === requestId)?.definitions?.title || "",
       });
       toast.success(`Definition ${approve ? "approved" : "rejected"}`);
+      emitAppDataChanged({ entityType: "definition", action: "updated", entityId: definitionId });
       fetchData();
     } else toast.error(reqError.message);
     setProcessing(null);
@@ -65,6 +67,12 @@ export default function Workflow() {
     status: statusFilter,
     sortBy,
   });
+
+  useEffect(() => {
+    return subscribeToAppDataChanges(() => {
+      fetchData();
+    });
+  }, []);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

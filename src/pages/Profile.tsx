@@ -11,10 +11,10 @@ import { Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getPrimaryRole, type EditableRole, updateMyRole } from "@/lib/role-service";
+import { editableRoles, getPrimaryRole, type EditableRole, updateMyRole } from "@/lib/role-service";
 
 export default function Profile() {
-  const { profile, roles, refreshProfile, hasRole } = useAuth();
+  const { profile, roles, refreshProfile } = useAuth();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [roleSaving, setRoleSaving] = useState(false);
@@ -136,20 +136,17 @@ export default function Profile() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="viewer">Viewer</SelectItem>
-                <SelectItem value="editor">Editor</SelectItem>
-                <SelectItem value="admin" disabled={!hasRole("admin")}>Admin</SelectItem>
+                {editableRoles.map((role) => (
+                  <SelectItem key={role} value={role}>
+                    {role.charAt(0).toUpperCase() + role.slice(1)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <p className="text-xs text-muted-foreground">
             Viewer is read-only. Editor can create and edit ontology content. Admin keeps full access, including user management.
           </p>
-          {!hasRole("admin") && (
-            <p className="text-xs text-muted-foreground">
-              The admin option is only available to existing admins to avoid unsafe self-promotion.
-            </p>
-          )}
           {roleSaving && (
             <div className="flex items-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -571,6 +571,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      delete_definition_cascade: {
+        Args: {
+          _definition_id: string
+        }
+        Returns: Json
+      }
+      delete_ontology_cascade: {
+        Args: {
+          _ontology_id: string
+        }
+        Returns: Json
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { fetchFavoriteItems, type FavoriteListItem } from "@/lib/favorites-service";
 import { supabase } from "@/integrations/supabase/client";
+import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function Favorites() {
   const { user } = useAuth();
@@ -17,10 +18,22 @@ export default function Favorites() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-    fetchFavoriteItems(supabase, user.id)
-      .then((data) => setItems(data))
-      .finally(() => setLoading(false));
+    const fetchData = async () => {
+      if (!user) {
+        return;
+      }
+
+      setLoading(true);
+      await fetchFavoriteItems(supabase, user.id)
+        .then((data) => setItems(data))
+        .finally(() => setLoading(false));
+    };
+
+    fetchData();
+
+    return subscribeToAppDataChanges(() => {
+      fetchData();
+    });
   }, [user]);
 
   return (
