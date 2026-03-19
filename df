@@ -1,0 +1,23 @@
+[33mcommit 0a2817553beb86e869bc22ed99e2d297059762b9[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mv0_artom[m[33m, [m[1;31morigin/v0_artom[m[33m)[m
+Author: Artem <artemobenko@gmail.com>
+Date:   Wed Mar 18 17:26:15 2026 +0100
+
+    some magic, maybe broken be careful
+
+[33mcommit 873b6e646e9e6b4e8a1eb3691d8f31512fe5f16f[m
+Author: Julianvanbijlert <116498773+Julianvanbijlert@users.noreply.github.com>
+Date:   Wed Mar 18 16:41:31 2026 +0100
+
+    Fix filters and add semantic search
+
+[33mcommit 6a95541b39605be3c84048141c36e540417899ce[m
+Author: Julianvanbijlert <116498773+Julianvanbijlert@users.noreply.github.com>
+Date:   Wed Mar 18 16:18:42 2026 +0100
+
+    Search function added, made searchbar more viewable
+
+[33mcommit 0313c71cc2abca2193f36537866de1f7de2fc594[m[33m ([m[1;32mv0_artyom[m[33m)[m
+Author: Artem <artemobenko@gmail.com>
+Date:   Wed Mar 18 12:53:03 2026 +0100
+
+    v0 magic using figma sketches and marketing plan

@@ -13,7 +13,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { User, Settings, LogOut } from 'lucide-react'
+import { User, Settings, LogOut, Bell } from 'lucide-react'
+import { Sidebar } from '@/components/sidebar'
+import { GlobalSearch } from '@/components/global-search'
+import { Button } from '@/components/ui/button'
 
 interface AppShellProps {
   children: React.ReactNode

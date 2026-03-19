@@ -14,9 +14,18 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { useAppContext } from '@/lib/app-context'
-import { Download, Heart, HeartOff, Share2, Star, StarOff } from 'lucide-react'
+import { Download, Heart, HeartOff, Share2, Star, StarOff, ArrowLeft, BookOpen, User, Clock, Edit, FileText, Network, MessageSquare, Send, History as LucideHistory } from 'lucide-react'
+import { AppShell } from '@/components/app-shell'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/status-badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { cn } from '@/lib/utils'
 
-const mockHistory = [
 
 const mockComments = [
   {
@@ -286,7 +295,7 @@ export default function ConceptDetailPage({ params }: { params: Promise<{ id: st
               <span className="hidden sm:inline">Documents</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="gap-2">
-              <History className="h-4 w-4" />
+              <LucideHistory className="h-4 w-4" />
               <span className="hidden sm:inline">History</span>
             </TabsTrigger>
           </TabsList>
@@ -345,7 +354,7 @@ export default function ConceptDetailPage({ params }: { params: Promise<{ id: st
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-slate-200">{c.author}</span>
                         <Badge variant="secondary" className="bg-slate-800 text-slate-400 text-[10px]">
-                          {c.role}
+                          {c.authorRole}
                         </Badge>
                         <span className="text-xs text-slate-500">{c.timestamp}</span>
                       </div>
@@ -536,7 +545,7 @@ export default function ConceptDetailPage({ params }: { params: Promise<{ id: st
                         <div className="absolute left-[15px] top-8 h-full w-px bg-border" />
                       )}
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-card">
-                        <History className="h-4 w-4 text-muted-foreground" />
+                        <LucideHistory className="h-4 w-4 text-muted-foreground" />
                       </div>
                       <div className="flex-1 pt-1">
                         <div className="flex items-center gap-2">

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   Search,
   BookOpen,
@@ -31,7 +31,7 @@ const navigation = [
   { name: 'Home', href: '/', icon: Home },
   { name: 'Search', href: '/search', icon: Search },
   { name: 'Ontologies', href: '/ontologies', icon: BookOpen },
-  { name: 'Workflows', href: '/workflows', icon: GitPullRequest, badge: workflowItems.length },
+  { name: 'Workflows', href: '/workflows', icon: GitPullRequest },
   { name: 'Imports', href: '/imports', icon: Import },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
 ]
@@ -86,6 +86,8 @@ export function Sidebar() {
     logout()
     router.push('/login')
   }
+
+  return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">

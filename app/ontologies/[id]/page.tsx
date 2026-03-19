@@ -20,6 +20,7 @@ import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/status-badge'
 import { useAppContext } from '@/lib/app-context'
 import { Star, Download } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 export default function OntologyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params)
