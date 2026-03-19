@@ -1,0 +1,7 @@
+Begrip,Definitie,Toelichting,Status,Trefwoorden
+Gegevensdeling,Het proces van het beschikbaar stellen van gegevens aan andere partijen voor hergebruik.,Focus op privacy en beveiliging in het J&V gegevensdelingsbeleid.,approved,"J&V, JAGA"
+Informatiemodel,Een formele beschrijving van gegevensstructuren en hun onderlinge relaties binnen een specifiek domein.,Essentieel voor interoperabiliteit tussen verschillende overheidssystemen.,in_review,"Modellering, FDS"
+Begrippenkader,Een verzameling van eenduidig gedefinieerde termen binnen een bepaald gebied of stelsel.,Het Federatief Datastelsel gebruikt een gedeeld begrippenkader voor consistentie.,draft,"FDS, Knowledge"
+Gegevensbron,De oorspronkelijke locatie waar data wordt vastgelegd of gegenereerd.,Bronregistraties vormen de ruggengraat van de Nederlandse data-infrastructuur.,approved,"Basisregistratie, Source"
+Algoritme,Een set van instructies of regels die worden gevolgd bij berekeningen of andere probleemoplossende operaties.,Onderdeel van het JAGA afsprakenstelsel voor transparante besluitvorming.,approved,"JAGA, AI"
+Interoperabiliteit,Het vermogen van verschillende systemen en organisaties om samen te werken en gegevens uit te wisselen.,Cruciaal voor het Federatief Datastelsel.,draft,"FDS, Technical"

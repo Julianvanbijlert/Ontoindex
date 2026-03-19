@@ -21,6 +21,7 @@ import Favorites from "./pages/Favorites";
 import Recent from "./pages/Recent";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
+import Imports from "./pages/Imports";
 import AdminUsers from "./pages/AdminUsers";
 import NotFound from "./pages/NotFound";
 
@@ -65,6 +66,7 @@ const App = () => (
             <Route path="/recent" element={<ProtectedRoute><Recent /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/imports" element={<ProtectedRoute><Imports /></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

@@ -9,9 +9,11 @@ import {
   importDefinitionsToOntology,
   REQUIRED_IMPORT_REQUIREMENTS,
   SUPPORTED_IMPORT_COLUMNS,
+  autoConnectFormatConfig,
   type ImportResult,
 } from "@/lib/import-service";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface ImportDialogProps {
   open: boolean;

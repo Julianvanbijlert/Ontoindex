@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, Network, Search as SearchIcon, X } from "lucide-react";
+import { Clock, Network, Search as SearchIcon, X, LayoutGrid, List, SlidersHorizontal, Eye } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,9 +24,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { subscribeToAppDataChanges } from "@/lib/entity-events";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function SearchPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -43,6 +44,10 @@ export default function SearchPage() {
   const [ontologies, setOntologies] = useState<Array<{ id: string; title: string }>>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState(false);
+
+  // Viewer Settings
+  const [viewSize, setViewSize] = useState<"small" | "medium" | "large">(profile?.view_preference as any || "medium");
+  const [viewFormat, setViewFormat] = useState<"grid" | "table">(profile?.format_preference as any || "grid");
 
   const hasActiveSearch = Boolean(
     query.trim() ||
@@ -73,7 +78,7 @@ export default function SearchPage() {
     setLoading(true);
 
     try {
-      const data = await searchEntities(
+      let data = await searchEntities(
         supabase,
         nextQuery,
         {
@@ -84,6 +89,42 @@ export default function SearchPage() {
         },
         sortBy,
       );
+
+      // Merge localStorage definitions for the demo
+      try {
+        const localGlobal = JSON.parse(localStorage.getItem("mock_db_definitions_global") || "[]");
+        if (localGlobal.length > 0) {
+          const normalizedQuery = nextQuery.toLowerCase().trim();
+          const localResults = localGlobal
+            .filter((d: any) => {
+              if (normalizedQuery && 
+                  !d.title.toLowerCase().includes(normalizedQuery) && 
+                  !d.description.toLowerCase().includes(normalizedQuery)) return false;
+              if (statusFilter !== "all" && d.status !== statusFilter) return false;
+              if (ontologyFilter !== "all" && ontologyFilter !== "global") return false;
+              return true;
+            })
+            .map((d: any) => ({
+              id: d.id,
+              type: "definition" as const,
+              title: d.title,
+              description: d.description,
+              status: d.status,
+              updatedAt: d.updated_at,
+              viewCount: d.view_count || 0,
+              tags: d.tags || [],
+              ontologyId: "global",
+              ontologyTitle: "Imported",
+              relevance: 1 // Default high relevance for local matches
+            }));
+          data = [...data, ...localResults];
+          
+          // Sort by relevance after merge
+          data.sort((a, b) => (b.relevance || 0) - (a.relevance || 0));
+        }
+      } catch (e) {
+        console.warn("Local search merge failed", e);
+      }
 
       setResults(data);
     } finally {
@@ -189,20 +230,41 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground tracking-tight">Search</h1>
-        <p className="text-muted-foreground mt-1">Find definitions and whole ontologies from one place</p>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">Search</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Find definitions and whole ontologies from one place</p>
+        </div>
+        
+        <div className="flex items-center gap-3">
+           <div className="flex items-center gap-1.5 bg-muted/40 p-1 rounded-lg border border-border/50">
+            <Button variant={viewFormat === "grid" ? "secondary" : "ghost"} size="sm" className="h-7 w-7 p-0" onClick={() => setViewFormat("grid")}>
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant={viewFormat === "table" ? "secondary" : "ghost"} size="sm" className="h-7 w-7 p-0" onClick={() => setViewFormat("table")}>
+              <List className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          <Tabs value={viewSize} onValueChange={v => setViewSize(v as any)}>
+            <TabsList className="h-7 bg-muted/40 border border-border/50">
+              <TabsTrigger value="small" className="text-[9px] px-2 h-5">S</TabsTrigger>
+              <TabsTrigger value="medium" className="text-[9px] px-2 h-5">M</TabsTrigger>
+              <TabsTrigger value="large" className="text-[9px] px-2 h-5">L</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4 bg-card p-5 rounded-xl border border-border/50 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               ref={inputRef}
               placeholder="Search definitions and ontologies..."
-              className="pl-9"
+              className="pl-9 h-11"
               value={query}
               onFocus={() => setShowHistory(searchHistory.length > 0)}
               onBlur={() => {
@@ -256,12 +318,12 @@ export default function SearchPage() {
             )}
           </div>
 
-          <Button onClick={() => handleSubmitSearch()}>Search</Button>
+          <Button onClick={() => handleSubmitSearch()} className="h-11 px-8">Search</Button>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5 pt-2">
           <Select value={ontologyFilter} onValueChange={setOntologyFilter}>
-            <SelectTrigger><SelectValue placeholder="Ontology" /></SelectTrigger>
+            <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Ontology" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All ontologies</SelectItem>
               {ontologies.map((ontology) => (
@@ -271,7 +333,7 @@ export default function SearchPage() {
           </Select>
 
           <Select value={tagFilter} onValueChange={setTagFilter}>
-            <SelectTrigger><SelectValue placeholder="Tag" /></SelectTrigger>
+            <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Tag" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All tags</SelectItem>
               {availableTags.map((tag) => (
@@ -281,7 +343,7 @@ export default function SearchPage() {
           </Select>
 
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
               <SelectItem value="draft">Draft</SelectItem>
@@ -293,7 +355,7 @@ export default function SearchPage() {
           </Select>
 
           <Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as typeof typeFilter)}>
-            <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
+            <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All results</SelectItem>
               <SelectItem value="definition">Definitions</SelectItem>
@@ -302,7 +364,7 @@ export default function SearchPage() {
           </Select>
 
           <Select value={sortBy} onValueChange={(value) => setSortBy(value as SearchSort)}>
-            <SelectTrigger><SelectValue placeholder="Sort by" /></SelectTrigger>
+            <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Sort by" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="relevance">Relevance</SelectItem>
               <SelectItem value="recent">Most Recent</SelectItem>
@@ -314,43 +376,69 @@ export default function SearchPage() {
       </div>
 
       {loading ? (
-        <div className="space-y-3">{[1, 2, 3].map((item) => <Skeleton key={item} className="h-24 w-full rounded-lg" />)}</div>
+        <div className="grid gap-4">{[1, 2, 3].map((item) => <Skeleton key={item} className="h-24 w-full rounded-lg" />)}</div>
       ) : hasSubmittedSearch && results.length === 0 ? (
         <EmptyState
           icon={<SearchIcon className="w-6 h-6" />}
-          title="No results"
-          description={`No definitions or ontologies matched "${query}".`}
+          title="No results found"
+          description={`We couldn't find anything matching "${query}" with current filters.`}
         />
       ) : (
-        <div className="space-y-2">
+        <div className={cn(
+          "gap-4",
+          viewFormat === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" : "flex flex-col"
+        )}>
           {results.map((result) => (
             <Card
               key={`${result.type}-${result.id}`}
-              className="border-border/50 hover:border-border transition-colors cursor-pointer"
+              className={cn(
+                "group border-border/50 hover:border-primary/50 transition-all cursor-pointer overflow-hidden",
+                viewSize === "small" ? "p-0" : ""
+              )}
               onClick={() => navigate(result.type === "ontology" ? `/ontologies/${result.id}` : `/definitions/${result.id}`)}
             >
-              <CardContent className="p-4">
-                <div className="mb-1 flex items-center gap-2">
-                  <h3 className="font-medium text-foreground">{result.title}</h3>
-                  <Badge variant="outline" className="text-[10px]">
-                    {result.type === "ontology" ? "Ontology" : "Definition"}
-                  </Badge>
-                  <StatusBadge status={result.status} />
-                  {result.type === "definition" && <PriorityBadge priority={result.priority} />}
+              <CardContent className={cn(
+                "flex flex-col gap-3",
+                viewSize === "small" ? "p-3" : viewSize === "large" ? "p-6" : "p-4"
+              )}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <h3 className={cn("font-semibold text-foreground group-hover:text-primary transition-colors", viewSize === "large" ? "text-lg" : "text-sm")}>
+                      {result.title}
+                    </h3>
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <Badge variant="outline" className="text-[9px] px-1 h-3.5 bg-muted/30">
+                        {result.type === "ontology" ? "Ontology" : "Definition"}
+                      </Badge>
+                      <StatusBadge status={result.status} />
+                      {result.type === "definition" && result.priority && <PriorityBadge priority={result.priority as any} />}
+                    </div>
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground line-clamp-2">{result.description || "No description"}</p>
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  {result.type === "definition" && result.ontologyTitle && (
-                    <span className="inline-flex items-center gap-1">
-                      <Network className="h-3 w-3" />
-                      {result.ontologyTitle}
-                    </span>
-                  )}
-                  {result.tags.slice(0, 3).map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
-                  ))}
-                  <span>{result.viewCount} views</span>
-                  <span>{new Date(result.updatedAt).toLocaleDateString()}</span>
+
+                <p className={cn(
+                  "text-muted-foreground line-clamp-2",
+                  viewSize === "small" ? "text-xs" : "text-sm"
+                )}>
+                  {result.description || "No description provided"}
+                </p>
+
+                <div className="flex items-center justify-between mt-1 pt-2 border-t border-border/50">
+                  <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+                    {result.type === "definition" && result.ontologyTitle && (
+                      <span className="inline-flex items-center gap-1 bg-muted px-1.5 py-0.5 rounded">
+                        <Network className="h-3 w-3" />
+                        {result.ontologyTitle}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{result.viewCount}</span>
+                    <span>{new Date(result.updatedAt).toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex gap-1">
+                    {result.tags.slice(0, 2).map((tag) => (
+                      <Badge key={tag} variant="secondary" className="text-[9px] px-1 h-3.5">{tag}</Badge>
+                    ))}
+                  </div>
                 </div>
               </CardContent>
             </Card>

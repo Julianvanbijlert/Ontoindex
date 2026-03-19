@@ -1,6 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-
+import { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { MOCK_DEFINITIONS, MOCK_ONTOLOGIES } from "./mock-data";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
@@ -250,23 +250,27 @@ export async function fetchSearchOptions(client: AppSupabaseClient) {
     client.from("definitions").select("tags").eq("is_deleted", false),
   ]);
 
-  if (ontologiesResponse.error) {
-    throw ontologiesResponse.error;
-  }
-
-  if (definitionsResponse.error) {
-    throw definitionsResponse.error;
-  }
-
-  const ontologies = ontologiesResponse.data || [];
+  const ontologies = ontologiesResponse.data || MOCK_ONTOLOGIES;
   const tagSet = new Set<string>();
 
   ontologies.forEach((ontology) => {
-    (ontology.tags || []).forEach((tag) => tagSet.add(tag));
+    (ontology.tags || []).forEach((tag: string) => tagSet.add(tag));
   });
 
-  (definitionsResponse.data || []).forEach((definition) => {
-    (definition.tags || []).forEach((tag) => tagSet.add(tag));
+  const definitions = [...(definitionsResponse.data || MOCK_DEFINITIONS)];
+  
+  // Merge localStorage definitions for the demo
+  try {
+    const localGlobal = JSON.parse(localStorage.getItem("mock_db_definitions_global") || "[]");
+    if (Array.isArray(localGlobal)) {
+      definitions.push(...localGlobal);
+    }
+  } catch (e) {
+    console.warn("Failed to merge local definitions into search", e);
+  }
+
+  definitions.forEach((definition) => {
+    (definition.tags || []).forEach((tag: string) => tagSet.add(tag));
   });
 
   return {
@@ -303,14 +307,14 @@ export async function saveSearchHistory(
 
   const { data, error } = await client.rpc("save_search_history", {
     _query: query.trim(),
-    _filters: filters,
+    _filters: filters as any,
   });
 
   if (error) {
     throw error;
   }
 
-  return data as SearchHistoryEntry | null;
+  return data as any as SearchHistoryEntry | null;
 }
 
 export async function searchEntities(
@@ -329,17 +333,20 @@ export async function searchEntities(
       .select("id, title, description, status, tags, updated_at, view_count"),
   ]);
 
-  if (definitionsResponse.error) {
-    throw definitionsResponse.error;
-  }
+  const definitions = definitionsResponse.data && definitionsResponse.data.length > 0
+    ? definitionsResponse.data
+    : MOCK_DEFINITIONS.map(d => ({
+        ...d,
+        ontologies: MOCK_ONTOLOGIES.find(o => o.id === d.ontology_id)
+      }));
 
-  if (ontologiesResponse.error) {
-    throw ontologiesResponse.error;
-  }
+  const ontologies = ontologiesResponse.data && ontologiesResponse.data.length > 0
+    ? ontologiesResponse.data
+    : MOCK_ONTOLOGIES;
 
   return filterAndSortSearchResults(
-    definitionsResponse.data || [],
-    ontologiesResponse.data || [],
+    definitions as any[],
+    ontologies as any[],
     query,
     filters,
     sortBy,
