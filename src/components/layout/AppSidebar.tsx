@@ -17,7 +17,7 @@ const mainItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Ontologies", url: "/ontologies", icon: Network },
   { title: "Definitions", url: "/definitions", icon: BookOpen },
-  { title: "Imports", url: "/imports", icon: Database },
+  { title: "Import", url: "/imports", icon: Database },
   { title: "Workflow", url: "/workflow", icon: GitPullRequest },
   { title: "Notifications", url: "/notifications", icon: Bell },
 ];

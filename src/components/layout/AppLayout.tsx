@@ -18,6 +18,7 @@ const breadcrumbMap: Record<string, string> = {
   "/recent": "Recent",
   "/profile": "Profile",
   "/settings": "Settings",
+  "/imports": "Import",
 };
 
 export function AppLayout({ children }: { children: ReactNode }) {

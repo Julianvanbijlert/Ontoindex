@@ -48,7 +48,7 @@ export default function Imports() {
   return (
     <div className="max-w-2xl mx-auto py-20 px-4 space-y-10 text-center">
       <div className="space-y-4">
-        <h1 className="text-4xl font-black tracking-tight uppercase">Bulk Import</h1>
+        <h1 className="text-4xl font-black tracking-tight">Import</h1>
       </div>
 
       <div className="space-y-6">
@@ -63,7 +63,7 @@ export default function Imports() {
           <div className="bg-white p-4 rounded-2xl shadow-xl mb-4 group-hover:scale-110 transition-transform">
             {file ? <Database className="h-8 w-8 text-primary" /> : <Upload className="h-8 w-8 text-zinc-400" />}
           </div>
-          <p className="text-xl font-bold">{file ? file.name : "Upload your files (turtle, csv, rdf)"}</p>
+          <p className="text-xl font-bold">{file ? file.name : "Upload your files"}</p>
           <p className="text-sm text-muted-foreground">{file ? `${(file.size / 1024).toFixed(1)} KB` : "Drag and drop or click to browse"}</p>
         </label>
 
