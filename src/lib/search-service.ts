@@ -345,3 +345,104 @@ export async function searchEntities(
     sortBy,
   );
 }
+
+export async function fetchRecentFinds(client: AppSupabaseClient, userId: string) {
+  const { data: activity, error: activityError } = await client
+    .from("activity_events")
+    .select("entity_id, entity_type, created_at")
+    .eq("user_id", userId)
+    .in("entity_type", ["definition", "ontology"])
+    .not("entity_id", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  if (activityError) {
+    throw activityError;
+  }
+
+  const orderedKeys: string[] = [];
+  const latestByKey = new Map<string, string>();
+
+  (activity || []).forEach((event) => {
+    if (!event.entity_id) {
+      return;
+    }
+
+    const key = `${event.entity_type}:${event.entity_id}`;
+
+    if (!latestByKey.has(key)) {
+      orderedKeys.push(key);
+      latestByKey.set(key, event.created_at);
+    }
+  });
+
+  const definitionIds = orderedKeys
+    .filter((key) => key.startsWith("definition:"))
+    .map((key) => key.replace("definition:", ""));
+  const ontologyIds = orderedKeys
+    .filter((key) => key.startsWith("ontology:"))
+    .map((key) => key.replace("ontology:", ""));
+
+  const [definitionsResponse, ontologiesResponse] = await Promise.all([
+    definitionIds.length > 0
+      ? client
+          .from("definitions")
+          .select("id, title, description, content, ontology_id, priority, status, tags, updated_at, view_count, ontologies(id, title)")
+          .in("id", definitionIds)
+          .eq("is_deleted", false)
+      : Promise.resolve({ data: [], error: null }),
+    ontologyIds.length > 0
+      ? client
+          .from("ontologies")
+          .select("id, title, description, status, tags, updated_at, view_count")
+          .in("id", ontologyIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (definitionsResponse.error) {
+    throw definitionsResponse.error;
+  }
+
+  if (ontologiesResponse.error) {
+    throw ontologiesResponse.error;
+  }
+
+  const itemMap = new Map<string, SearchResultItem>();
+
+  (definitionsResponse.data || []).forEach((definition: any) => {
+    itemMap.set(`definition:${definition.id}`, {
+      id: definition.id,
+      type: "definition",
+      title: definition.title,
+      description: definition.description || definition.content || "",
+      status: definition.status,
+      updatedAt: definition.updated_at,
+      viewCount: definition.view_count || 0,
+      tags: definition.tags || [],
+      ontologyId: definition.ontology_id,
+      ontologyTitle: definition.ontologies?.title || null,
+      priority: definition.priority,
+      relevance: 0,
+    });
+  });
+
+  (ontologiesResponse.data || []).forEach((ontology: any) => {
+    itemMap.set(`ontology:${ontology.id}`, {
+      id: ontology.id,
+      type: "ontology",
+      title: ontology.title,
+      description: ontology.description || "",
+      status: ontology.status,
+      updatedAt: ontology.updated_at,
+      viewCount: ontology.view_count || 0,
+      tags: ontology.tags || [],
+      ontologyId: ontology.id,
+      ontologyTitle: ontology.title,
+      relevance: 0,
+    });
+  });
+
+  return orderedKeys
+    .map((key) => itemMap.get(key))
+    .filter(Boolean) as SearchResultItem[];
+}

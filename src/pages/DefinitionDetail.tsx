@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,7 +12,7 @@ import { StatusBadge, PriorityBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
-import { Edit2, Save, X, Loader2, Send, Eye, Network, Trash2 } from "lucide-react";
+import { Edit2, Save, X, Loader2, Send, Eye, Network, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -32,8 +32,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { deleteDefinition } from "@/lib/entity-service";
+import { deleteDefinition, updateDefinition } from "@/lib/entity-service";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
+import { fetchEntityTimelineEvents, recordEntityView } from "@/lib/history-service";
+import {
+  fetchReviewerOptions,
+  formatReviewerLabel,
+  type ReviewAssignmentRecord,
+  type ReviewerOption,
+  upsertDefinitionReviewRequest,
+} from "@/lib/workflow-service";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -45,11 +54,19 @@ export default function DefinitionDetail() {
   const [editData, setEditData] = useState({ title: "", description: "", content: "", example: "" });
   const [saving, setSaving] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [versions, setVersions] = useState<any[]>([]);
   const [relationships, setRelationships] = useState<any[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<TimelineEvent[]>([]);
   const [isFavorited, setIsFavorited] = useState(false);
   const [approvalMsg, setApprovalMsg] = useState("");
   const [requesting, setRequesting] = useState(false);
+  const [reviewRequest, setReviewRequest] = useState<any>(null);
+  const [reviewAssignments, setReviewAssignments] = useState<ReviewAssignmentRecord[]>([]);
+  const [reviewerOptions, setReviewerOptions] = useState<ReviewerOption[]>([]);
+  const [teamOptions, setTeamOptions] = useState<string[]>([]);
+  const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
+  const [selectedReviewerTeams, setSelectedReviewerTeams] = useState<string[]>([]);
+  const [pendingReviewerUserId, setPendingReviewerUserId] = useState<string>("none");
+  const [pendingReviewerTeam, setPendingReviewerTeam] = useState<string>("none");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -57,6 +74,7 @@ export default function DefinitionDetail() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
   const canEditContent = hasRole("admin") || hasRole("editor");
+  const viewedDefinitionIdRef = useRef<string | null>(null);
 
   const fetchAll = async () => {
     if (!id) return;
@@ -66,12 +84,24 @@ export default function DefinitionDetail() {
     setHistoryError(null);
     setRelationshipsError(null);
 
-    const [defRes, comRes, verRes, relRes, favRes] = await Promise.all([
+    const [defRes, comRes, relRes, favRes, reviewRes, historyRes] = await Promise.all([
       supabase.from("definitions").select("*, ontologies(id, title)").eq("id", id).single(),
       supabase.from("comments").select("*").eq("definition_id", id).order("created_at", { ascending: true }),
-      supabase.from("version_history").select("*").eq("definition_id", id).order("version", { ascending: false }),
       supabase.from("relationships").select("id, source_id, target_id, type, label, source:source_id(id, title), target:target_id(id, title)").or(`source_id.eq.${id},target_id.eq.${id}`),
       user ? supabase.from("favorites").select("id").eq("user_id", user.id).eq("definition_id", id).maybeSingle() : Promise.resolve({ data: null }),
+      supabase
+        .from("approval_requests")
+        .select("id, status, message, review_message, requested_by, created_at, updated_at, definition_id")
+        .eq("definition_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      fetchEntityTimelineEvents(supabase, "definition", id)
+        .then((events) => ({ data: events, error: null }))
+        .catch((error) => ({
+          data: [] as TimelineEvent[],
+          error: error instanceof Error ? error : new Error("Unable to load history."),
+        })),
     ]);
 
     if (defRes.data) {
@@ -85,13 +115,44 @@ export default function DefinitionDetail() {
       await supabase.from("definitions").update({ view_count: (defRes.data.view_count || 0) + 1 }).eq("id", id);
     }
     setComments(comRes.data || []);
-    setVersions(verRes.data || []);
     setRelationships(relRes.data || []);
+    setHistoryEvents(historyRes.data || []);
     setIsFavorited(!!favRes.data);
-    setHistoryError(verRes.error?.message || null);
+    setReviewRequest(reviewRes.data || null);
+    setHistoryError(historyRes.error?.message || null);
     setRelationshipsError(relRes.error?.message || null);
     setHistoryLoading(false);
     setRelationshipsLoading(false);
+
+    if (reviewRes.data?.id) {
+      const assignmentsRes = await supabase
+        .from("approval_request_assignments" as any)
+        .select("*")
+        .eq("approval_request_id", reviewRes.data.id)
+        .order("created_at", { ascending: true });
+
+      const assignments = (assignmentsRes.data || []) as ReviewAssignmentRecord[];
+      const reviewerIds = assignments.map((assignment) => assignment.reviewer_user_id).filter(Boolean) as string[];
+
+      if (reviewerIds.length > 0) {
+        const profileRes = await supabase.from("profiles").select("user_id, display_name, email, team").in("user_id", reviewerIds);
+        const profileMap = new Map((profileRes.data || []).map((profile: any) => [profile.user_id, profile]));
+        assignments.forEach((assignment) => {
+          if (assignment.reviewer_user_id) {
+            assignment.profiles = profileMap.get(assignment.reviewer_user_id) || null;
+          }
+        });
+      }
+
+      setReviewAssignments(assignments);
+      setSelectedReviewerIds(assignments.map((assignment) => assignment.reviewer_user_id).filter(Boolean) as string[]);
+      setSelectedReviewerTeams(assignments.map((assignment) => assignment.reviewer_team).filter(Boolean) as string[]);
+    } else {
+      setReviewAssignments([]);
+      setSelectedReviewerIds([]);
+      setSelectedReviewerTeams([]);
+    }
+
     setLoading(false);
   };
 
@@ -113,31 +174,62 @@ export default function DefinitionDetail() {
     });
   }, [id, user]);
 
+  useEffect(() => {
+    if (!canEditContent) {
+      return;
+    }
+
+    fetchReviewerOptions(supabase)
+      .then((options) => {
+        setReviewerOptions(options.users);
+        setTeamOptions(options.teams);
+      })
+      .catch(() => undefined);
+  }, [canEditContent]);
+
+  useEffect(() => {
+    if (!definition?.id || !definition.title || !user?.id || viewedDefinitionIdRef.current === definition.id) {
+      return;
+    }
+
+    viewedDefinitionIdRef.current = definition.id;
+    recordEntityView(supabase, {
+      userId: user.id,
+      entityType: "definition",
+      entityId: definition.id,
+      entityTitle: definition.title,
+    }).catch(() => undefined);
+  }, [definition?.id, definition?.title, user?.id]);
+
   const handleSave = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!definition || !editData.title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
-    await supabase.from("version_history").insert({
-      definition_id: definition.id, version: definition.version,
-      title: definition.title, description: definition.description,
-      content: definition.content, metadata: definition.metadata,
-      changed_by: user?.id, change_summary: "Updated definition",
-    });
-    const { error } = await supabase.from("definitions").update({
-      title: editData.title.trim(), description: editData.description.trim(),
-      content: editData.content.trim(), example: editData.example.trim(),
-      version: definition.version + 1,
-    }).eq("id", definition.id);
-    if (error) toast.error(error.message);
-    else {
-      await supabase.from("activity_events").insert({
-        user_id: user?.id, action: "updated", entity_type: "definition",
-        entity_id: definition.id, entity_title: editData.title,
+    try {
+      await updateDefinition(supabase, {
+        definitionId: definition.id,
+        userId: user?.id,
+        previous: {
+          title: definition.title,
+          description: definition.description,
+          content: definition.content,
+          example: definition.example,
+          metadata: definition.metadata,
+          version: definition.version,
+        },
+        changes: {
+          title: editData.title.trim(),
+          description: editData.description.trim(),
+          content: editData.content.trim(),
+          example: editData.example.trim(),
+        },
       });
       toast.success("Definition updated");
       setEditing(false);
       emitAppDataChanged({ entityType: "definition", action: "updated", entityId: definition.id });
       fetchAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update definition");
     }
     setSaving(false);
   };
@@ -145,18 +237,43 @@ export default function DefinitionDetail() {
   const handleRequestApproval = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!user || !id) return;
+    if (selectedReviewerIds.length === 0 && selectedReviewerTeams.length === 0) {
+      toast.error("Assign at least one reviewer user or team.");
+      return;
+    }
     setRequesting(true);
-    const { error } = await supabase.from("approval_requests").insert({
-      definition_id: id, requested_by: user.id, message: approvalMsg, status: "in_review" as any,
-    });
-    if (!error) {
-      await supabase.from("definitions").update({ status: "in_review" as any }).eq("id", id);
+    try {
+      await upsertDefinitionReviewRequest(supabase, id, {
+        message: approvalMsg,
+        reviewerUserIds: selectedReviewerIds,
+        reviewerTeams: selectedReviewerTeams,
+      });
       toast.success("Approval requested");
       setApprovalMsg("");
       emitAppDataChanged({ entityType: "definition", action: "updated", entityId: id });
       fetchAll();
-    } else toast.error(error.message);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to request approval");
+    }
     setRequesting(false);
+  };
+
+  const addReviewerUser = () => {
+    if (pendingReviewerUserId === "none") {
+      return;
+    }
+
+    setSelectedReviewerIds((current) => Array.from(new Set([...current, pendingReviewerUserId])));
+    setPendingReviewerUserId("none");
+  };
+
+  const addReviewerTeam = () => {
+    if (pendingReviewerTeam === "none") {
+      return;
+    }
+
+    setSelectedReviewerTeams((current) => Array.from(new Set([...current, pendingReviewerTeam])));
+    setPendingReviewerTeam("none");
   };
 
   const handleDeleteDefinition = async () => {
@@ -178,24 +295,6 @@ export default function DefinitionDetail() {
     setDeleting(false);
     setDeleteOpen(false);
   };
-
-  // Build timeline events
-  const timelineEvents: TimelineEvent[] = [];
-  if (definition) {
-    timelineEvents.push({
-      id: "creation", action: "created",
-      timestamp: definition.created_at,
-      metadata: { summary: `Created "${definition.title}"` },
-    });
-  }
-  versions.forEach(v => {
-    timelineEvents.push({
-      id: v.id, action: "updated",
-      timestamp: v.created_at,
-      metadata: { summary: v.change_summary || `Updated to v${v.version}` },
-    });
-  });
-  timelineEvents.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   if (loading) return (
     <div className="max-w-5xl mx-auto space-y-4">
@@ -360,8 +459,92 @@ export default function DefinitionDetail() {
                   <p className="text-sm text-muted-foreground">
                     Current status: <StatusBadge status={definition.status} />
                   </p>
+                  {reviewAssignments.length > 0 && (
+                    <div className="space-y-2 rounded-lg border border-border/50 bg-muted/30 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Assigned Reviewers</p>
+                      {reviewAssignments.map((assignment) => (
+                        <div key={assignment.id} className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">{formatReviewerLabel(assignment)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {assignment.reviewer_team ? "Team review" : assignment.profiles?.email || "User review"}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <Badge variant="outline" className="capitalize">{assignment.status}</Badge>
+                            {assignment.reviewed_at && (
+                              <p className="mt-1 text-[10px] text-muted-foreground">{new Date(assignment.reviewed_at).toLocaleString()}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {definition.status === "draft" || definition.status === "rejected" ? (
                     <>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Assign Reviewer User</Label>
+                          <div className="flex gap-2">
+                            <Select value={pendingReviewerUserId} onValueChange={setPendingReviewerUserId}>
+                              <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Select reviewer</SelectItem>
+                                {reviewerOptions
+                                  .filter((option) => option.userId !== user?.id)
+                                  .map((option) => (
+                                    <SelectItem key={option.userId} value={option.userId}>
+                                      {option.displayName}
+                                    </SelectItem>
+                                  ))}
+                              </SelectContent>
+                            </Select>
+                            <Button type="button" variant="outline" onClick={addReviewerUser}>
+                              <UserPlus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {selectedReviewerIds.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {selectedReviewerIds.map((reviewerId) => {
+                                const reviewer = reviewerOptions.find((option) => option.userId === reviewerId);
+                                return (
+                                  <Badge key={reviewerId} variant="secondary" className="gap-1">
+                                    {reviewer?.displayName || reviewerId}
+                                    <button type="button" onClick={() => setSelectedReviewerIds((current) => current.filter((value) => value !== reviewerId))}>x</button>
+                                  </Badge>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Assign Reviewer Team</Label>
+                          <div className="flex gap-2">
+                            <Select value={pendingReviewerTeam} onValueChange={setPendingReviewerTeam}>
+                              <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">Select team</SelectItem>
+                                {teamOptions.map((team) => (
+                                  <SelectItem key={team} value={team}>{team}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button type="button" variant="outline" onClick={addReviewerTeam}>
+                              <UserPlus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {selectedReviewerTeams.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {selectedReviewerTeams.map((team) => (
+                                <Badge key={team} variant="secondary" className="gap-1">
+                                  {team}
+                                  <button type="button" onClick={() => setSelectedReviewerTeams((current) => current.filter((value) => value !== team))}>x</button>
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                       <Textarea placeholder="Message for reviewers (optional)" value={approvalMsg} onChange={e => setApprovalMsg(e.target.value)} />
                       <Button onClick={handleRequestApproval} disabled={requesting}>
                         {requesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -386,7 +569,7 @@ export default function DefinitionDetail() {
           />
 
           <DefinitionHistorySection
-            events={timelineEvents}
+            events={historyEvents}
             loading={historyLoading}
             error={historyError}
           />

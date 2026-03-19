@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RoleBadge } from "@/components/shared/RoleBadge";
+import { useNavigate } from "react-router-dom";
 
 const mainItems = [
   { title: "Search", url: "/search", icon: Search },
@@ -35,6 +36,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const { profile, roles, signOut, hasRole } = useAuth();
+  const navigate = useNavigate();
 
   const initials = profile?.display_name
     ? profile.display_name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2)
@@ -121,21 +123,27 @@ export function AppSidebar() {
 
       <SidebarFooter className="p-3 border-t border-sidebar-border">
         <div className="flex items-center gap-3">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback className="bg-sidebar-accent text-sidebar-accent-foreground text-xs">
-              {initials}
-            </AvatarFallback>
-          </Avatar>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-sidebar-accent-foreground truncate">
-                {profile?.display_name || "User"}
-              </p>
-              <div className="flex gap-1 mt-0.5">
-                {roles.slice(0, 1).map(r => <RoleBadge key={r} role={r} />)}
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1 text-left transition-colors hover:bg-sidebar-accent/50"
+            onClick={() => navigate("/profile")}
+          >
+            <Avatar className="h-8 w-8">
+              <AvatarFallback className="bg-sidebar-accent text-sidebar-accent-foreground text-xs">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            {!collapsed && (
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-sidebar-accent-foreground truncate">
+                  {profile?.display_name || "User"}
+                </p>
+                <div className="flex gap-1 mt-0.5">
+                  {roles.slice(0, 1).map(r => <RoleBadge key={r} role={r} />)}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </button>
           {!collapsed && (
             <button onClick={signOut} className="text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors">
               <LogOut className="h-4 w-4" />

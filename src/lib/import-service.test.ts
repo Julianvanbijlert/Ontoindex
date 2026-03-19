@@ -96,10 +96,17 @@ describe("import-service", () => {
   });
 
   it("falls back to direct inserts when the import rpc is missing from the schema cache", async () => {
-    const insert = vi.fn().mockResolvedValue({ error: null });
+    const definitionSingle = vi.fn().mockResolvedValue({ data: { id: "definition-1" }, error: null });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
     const from = vi.fn((table: string) => {
-      if (table === "definitions" || table === "activity_events") {
-        return { insert };
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      if (table === "activity_events") {
+        return { insert: activityInsert };
       }
 
       throw new Error(`Unexpected table ${table}`);
@@ -129,14 +136,12 @@ describe("import-service", () => {
     });
     expect(result.warnings[0]).toContain("database import RPC was unavailable");
     expect(from).toHaveBeenCalledWith("definitions");
-    expect(insert).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          ontology_id: "onto-1",
-          created_by: "user-1",
-          title: "Access Policy",
-        }),
-      ]),
+    expect(definitionInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ontology_id: "onto-1",
+        created_by: "user-1",
+        title: "Access Policy",
+      }),
     );
   });
 });

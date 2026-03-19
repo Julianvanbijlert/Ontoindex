@@ -27,7 +27,11 @@ export default function Definitions() {
 
   const fetchData = async () => {
     setLoading(true);
-    let query = supabase.from("definitions").select("*, ontologies(id, title)").eq("is_deleted", false).order("updated_at", { ascending: false });
+    let query = supabase
+      .from("definitions")
+      .select("*, ontologies(id, title), relationships!relationships_source_id_fkey(id, type, label, target:target_id(id, title))")
+      .eq("is_deleted", false)
+      .order("updated_at", { ascending: false });
     if (statusFilter !== "all") query = query.eq("status", statusFilter as any);
     if (ontologyFilter !== "all") query = query.eq("ontology_id", ontologyFilter);
     if (searchQuery.trim()) query = query.or(`title.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`);
@@ -104,6 +108,15 @@ export default function Definitions() {
                     <PriorityBadge priority={d.priority} />
                   </div>
                   <p className="text-sm text-muted-foreground truncate">{d.description || "No description"}</p>
+                  {(d.relationships || []).length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {d.relationships.slice(0, 2).map((relationship: any) => (
+                        <Badge key={relationship.id} variant="outline" className="text-[10px]">
+                          {relationship.target?.title || "Unknown definition"}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                     {d.ontologies && (
                       <span className="inline-flex items-center gap-1">

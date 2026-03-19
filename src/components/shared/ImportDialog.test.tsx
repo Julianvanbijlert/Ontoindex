@@ -36,7 +36,7 @@ describe("ImportDialog", () => {
       />,
     );
 
-    const dropzone = screen.getByText(/drag and drop a csv or excel file here/i).closest("div")!;
+    const dropzone = screen.getByText(/drag and drop a supported ontology file here/i).closest("div")!;
 
     fireEvent.drop(dropzone, {
       dataTransfer: {
@@ -50,4 +50,3 @@ describe("ImportDialog", () => {
     expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ success: true, imported: 1 }));
   });
 });
-

@@ -23,16 +23,47 @@ vi.mock("@/components/shared/ExportDialog", () => ({
   ExportDialog: () => null,
 }));
 
-vi.mock("@xyflow/react", () => ({
-  ReactFlow: ({ children }: any) => <div>{children}</div>,
-  Background: () => null,
-  Controls: () => null,
-  MiniMap: () => null,
-  useNodesState: () => [[], vi.fn(), vi.fn()],
-  useEdgesState: () => [[], vi.fn(), vi.fn()],
-}));
+vi.mock("@xyflow/react", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    ReactFlow: ({ children, nodes, onNodeDoubleClick }: any) => (
+      <div>
+        <button type="button" onClick={() => onNodeDoubleClick?.({}, nodes?.[0] || { id: "def-1" })}>
+          Rename Node
+        </button>
+        {children}
+      </div>
+    ),
+    Background: () => null,
+    Controls: () => null,
+    MiniMap: () => null,
+    addEdge: (_edge: any, edges: any[]) => edges,
+    useNodesState: (initial: any[] = []) => {
+      const [nodes, setNodes] = React.useState(initial);
+      return [nodes, setNodes, vi.fn()];
+    },
+    useEdgesState: (initial: any[] = []) => {
+      const [edges, setEdges] = React.useState(initial);
+      return [edges, setEdges, vi.fn()];
+    },
+  };
+});
 
 vi.mock("@/integrations/supabase/client", () => {
+  let definitionsData = [
+    {
+      id: "def-1",
+      title: "Access Policy",
+      description: "Definition",
+      content: "Definition content",
+      example: "",
+      metadata: {},
+      version: 1,
+      status: "approved",
+      relationships: [],
+    },
+  ];
   const ontologiesSingle = vi.fn().mockResolvedValue({
     data: {
       id: "onto-1",
@@ -55,22 +86,33 @@ vi.mock("@/integrations/supabase/client", () => {
   const ontologiesUpdateEq = vi.fn().mockResolvedValue({ error: null });
   const ontologiesUpdate = vi.fn().mockReturnValue({ eq: ontologiesUpdateEq });
 
-  const definitionsEqDeleted = vi.fn().mockResolvedValue({
-    data: [
-      {
-        id: "def-1",
-        title: "Access Policy",
-        description: "Definition",
-        status: "approved",
-        relationships: [],
-      },
-    ],
-  });
+  const definitionsEqDeleted = vi.fn().mockImplementation(() => Promise.resolve({ data: definitionsData }));
   const definitionsEqOntology = vi.fn().mockReturnValue({ eq: definitionsEqDeleted });
+  const definitionsUpdateSingle = vi.fn().mockImplementation(() => {
+    const updated = definitionsData[0];
+    return Promise.resolve({ data: updated, error: null });
+  });
+  const definitionsUpdateSelect = vi.fn().mockReturnValue({ single: definitionsUpdateSingle });
+  const definitionsUpdateEq = vi.fn().mockImplementation((_column: string, value: string) => {
+    definitionsData = definitionsData.map((definition) =>
+      definition.id === value
+        ? {
+            ...definition,
+            title: "Updated Access Policy",
+            version: definition.version + 1,
+          }
+        : definition,
+    );
+
+    return { select: definitionsUpdateSelect };
+  });
+  const definitionsUpdate = vi.fn().mockReturnValue({ eq: definitionsUpdateEq });
 
   const favoritesMaybeSingle = vi.fn().mockResolvedValue({ data: null });
   const favoritesEqOntology = vi.fn().mockReturnValue({ maybeSingle: favoritesMaybeSingle });
   const favoritesEqUser = vi.fn().mockReturnValue({ eq: favoritesEqOntology });
+  const versionInsert = vi.fn().mockResolvedValue({ error: null });
+  const activityInsert = vi.fn().mockResolvedValue({ error: null });
 
   return {
     supabase: {
@@ -85,12 +127,25 @@ vi.mock("@/integrations/supabase/client", () => {
         if (table === "definitions") {
           return {
             select: vi.fn().mockReturnValue({ eq: definitionsEqOntology }),
+            update: definitionsUpdate,
           };
         }
 
         if (table === "favorites") {
           return {
             select: vi.fn().mockReturnValue({ eq: favoritesEqUser }),
+          };
+        }
+
+        if (table === "version_history") {
+          return {
+            insert: versionInsert,
+          };
+        }
+
+        if (table === "activity_events") {
+          return {
+            insert: activityInsert,
           };
         }
 
@@ -119,5 +174,5 @@ describe("OntologyDetail", () => {
     expect(screen.queryByText("Relations")).not.toBeInTheDocument();
     expect(screen.getByText(/definitions \(1\)/i)).toBeInTheDocument();
   });
-});
 
+});

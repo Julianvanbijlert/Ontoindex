@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
   ReactFlow, Background, Controls, MiniMap,
-  useNodesState, useEdgesState, type Node, type Edge,
+  useNodesState, useEdgesState, type Node, type Edge, addEdge, type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { getWorkflowNodeStyle, workflowStatusConfig } from "@/lib/workflow-status";
@@ -36,9 +36,15 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { deleteOntology } from "@/lib/entity-service";
+import { deleteOntology, updateDefinition, updateOntology } from "@/lib/entity-service";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
-import { getRelationshipDisplayLabel } from "@/lib/relationship-service";
+import { recordEntityView } from "@/lib/history-service";
+import {
+  createRelationshipRecord,
+  CUSTOM_RELATION_TYPE,
+  getRelationshipDisplayLabel,
+  predefinedRelationshipTypes,
+} from "@/lib/relationship-service";
 
 export default function OntologyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -57,10 +63,20 @@ export default function OntologyDetail() {
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [graphRelationOpen, setGraphRelationOpen] = useState(false);
+  const [graphRenameOpen, setGraphRenameOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [creatingGraphRelation, setCreatingGraphRelation] = useState(false);
+  const [renamingGraphDefinition, setRenamingGraphDefinition] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState<Connection | null>(null);
+  const [graphRelationType, setGraphRelationType] = useState<string>(predefinedRelationshipTypes[0]);
+  const [graphCustomRelationType, setGraphCustomRelationType] = useState("");
+  const [graphRenameDefinitionId, setGraphRenameDefinitionId] = useState<string | null>(null);
+  const [graphRenameTitle, setGraphRenameTitle] = useState("");
   const [newDef, setNewDef] = useState({ title: "", description: "", content: "", example: "", priority: "normal" });
   const canEditContent = hasRole("admin") || hasRole("editor");
+  const viewedOntologyIdRef = useRef<string | null>(null);
 
   const fetchAll = async () => {
     if (!id) return;
@@ -126,20 +142,46 @@ export default function OntologyDetail() {
     });
   }, [id, user]);
 
+  useEffect(() => {
+    if (!ontology?.id || !ontology.title || !user?.id || viewedOntologyIdRef.current === ontology.id) {
+      return;
+    }
+
+    viewedOntologyIdRef.current = ontology.id;
+    recordEntityView(supabase, {
+      userId: user.id,
+      entityType: "ontology",
+      entityId: ontology.id,
+      entityTitle: ontology.title,
+    }).catch(() => undefined);
+  }, [ontology?.id, ontology?.title, user?.id]);
+
   const handleSaveOntology = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!ontology || !editData.title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
     const tags = editData.tags.split(",").map(t => t.trim()).filter(Boolean);
-    const { error } = await supabase.from("ontologies").update({
-      title: editData.title.trim(), description: editData.description.trim(), tags,
-    }).eq("id", ontology.id);
-    if (error) toast.error(error.message);
-    else {
+    try {
+      await updateOntology(supabase, {
+        ontologyId: ontology.id,
+        userId: user?.id,
+        previous: {
+          title: ontology.title,
+          description: ontology.description,
+          tags: ontology.tags || [],
+        },
+        changes: {
+          title: editData.title.trim(),
+          description: editData.description.trim(),
+          tags,
+        },
+      });
       toast.success("Ontology updated");
       setEditing(false);
       emitAppDataChanged({ entityType: "ontology", action: "updated", entityId: ontology.id });
       fetchAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update ontology");
     }
     setSaving(false);
   };
@@ -187,6 +229,109 @@ export default function OntologyDetail() {
 
     setDeleting(false);
     setDeleteOpen(false);
+  };
+
+  const handleGraphConnect = (connection: Connection) => {
+    if (!canEditContent || !connection.source || !connection.target) {
+      return;
+    }
+
+    setPendingConnection(connection);
+    setGraphRelationType(predefinedRelationshipTypes[0]);
+    setGraphCustomRelationType("");
+    setGraphRelationOpen(true);
+  };
+
+  const handleCreateGraphRelationship = async () => {
+    if (!pendingConnection?.source || !pendingConnection.target || !user) {
+      return;
+    }
+
+    setCreatingGraphRelation(true);
+    try {
+      const data = await createRelationshipRecord(supabase, {
+        sourceId: pendingConnection.source,
+        targetId: pendingConnection.target,
+        selectedType: graphRelationType as any,
+        customType: graphCustomRelationType,
+        createdBy: user.id,
+      });
+      setEdges((current) =>
+        addEdge(
+          {
+            id: data.id,
+            source: pendingConnection.source!,
+            target: pendingConnection.target!,
+            label: getRelationshipDisplayLabel(data.type, data.label),
+            style: { stroke: "hsl(var(--primary))" },
+            labelStyle: { fontSize: 11, fill: "hsl(var(--muted-foreground))" },
+          },
+          current,
+        ),
+      );
+      toast.success("Relationship created");
+      emitAppDataChanged({ entityType: "relationship", action: "created", entityId: data.id });
+      fetchAll();
+      setGraphRelationOpen(false);
+      setPendingConnection(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create relationship");
+    }
+
+    setCreatingGraphRelation(false);
+  };
+
+  const openGraphRenameDialog = (definitionId: string) => {
+    const selectedDefinition = definitions.find((definition) => definition.id === definitionId);
+
+    if (!selectedDefinition || !canEditContent) {
+      return;
+    }
+
+    setGraphRenameDefinitionId(definitionId);
+    setGraphRenameTitle(selectedDefinition.title);
+    setGraphRenameOpen(true);
+  };
+
+  const handleRenameGraphDefinition = async () => {
+    const selectedDefinition = definitions.find((definition) => definition.id === graphRenameDefinitionId);
+
+    if (!selectedDefinition || !graphRenameTitle.trim()) {
+      toast.error("Definition name is required");
+      return;
+    }
+
+    setRenamingGraphDefinition(true);
+
+    try {
+      await updateDefinition(supabase, {
+        definitionId: selectedDefinition.id,
+        userId: user?.id,
+        source: "graph",
+        previous: {
+          title: selectedDefinition.title,
+          description: selectedDefinition.description,
+          content: selectedDefinition.content,
+          example: selectedDefinition.example,
+          metadata: selectedDefinition.metadata,
+          version: selectedDefinition.version,
+        },
+        changes: {
+          title: graphRenameTitle.trim(),
+          description: selectedDefinition.description,
+          content: selectedDefinition.content,
+          example: selectedDefinition.example,
+        },
+      });
+      toast.success("Definition renamed");
+      setGraphRenameOpen(false);
+      emitAppDataChanged({ entityType: "definition", action: "updated", entityId: selectedDefinition.id });
+      fetchAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to rename definition");
+    }
+
+    setRenamingGraphDefinition(false);
   };
 
   if (loading) return (
@@ -321,6 +466,15 @@ export default function OntologyDetail() {
                     <div className="min-w-0">
                       <h3 className="font-medium text-foreground">{d.title}</h3>
                       <p className="text-sm text-muted-foreground truncate">{d.description || "No description"}</p>
+                      {(d.relationships || []).length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {d.relationships.slice(0, 2).map((relationship: any) => (
+                            <Badge key={relationship.id} variant="outline" className="text-[10px]">
+                              {relationship.target?.title || "Unknown definition"}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <StatusBadge status={d.status} />
                   </CardContent>
@@ -344,13 +498,27 @@ export default function OntologyDetail() {
                   </Badge>
                 ))}
               </div>
+              {canEditContent && (
+                <p className="text-xs text-muted-foreground">
+                  Double-click a node to rename the real definition, or drag a connection between nodes to create a relationship.
+                </p>
+              )}
               <div style={{ height: 450 }}>
                 {nodes.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                     <div className="text-center"><Network className="h-8 w-8 mx-auto mb-2 opacity-50" /><p>No definitions to graph</p></div>
                   </div>
                 ) : (
-                  <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} fitView style={{ background: "hsl(var(--background))" }}>
+                  <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={handleGraphConnect}
+                    onNodeDoubleClick={(_, node) => openGraphRenameDialog(node.id)}
+                    fitView
+                    style={{ background: "hsl(var(--background))" }}
+                  >
                     <Background color="hsl(var(--border))" gap={20} />
                     <Controls />
                     <MiniMap style={{ background: "hsl(var(--card))" }} />
@@ -390,7 +558,71 @@ export default function OntologyDetail() {
           setImportOpen(false);
         }}
       />
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} data={definitions} entityName="definitions" />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} ontologyId={ontology.id} ontologyTitle={ontology.title} entityName="definitions" />
+
+      <Dialog open={graphRelationOpen} onOpenChange={setGraphRelationOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Create Relationship</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm">
+              <p className="font-medium text-foreground">
+                <span>{(definitions.find((definition) => definition.id === pendingConnection?.source)?.title || "Source definition")}</span>
+                {pendingConnection?.source && canEditContent && (
+                  <Button type="button" variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={() => openGraphRenameDialog(pendingConnection.source!)}>
+                    <Edit2 className="h-3 w-3 mr-1" />Rename
+                  </Button>
+                )}
+              </p>
+              <p className="text-muted-foreground">
+                <span>connects to {(definitions.find((definition) => definition.id === pendingConnection?.target)?.title || "Target definition")}</span>
+                {pendingConnection?.target && canEditContent && (
+                  <Button type="button" variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={() => openGraphRenameDialog(pendingConnection.target!)}>
+                    <Edit2 className="h-3 w-3 mr-1" />Rename
+                  </Button>
+                )}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Relationship type</Label>
+              <Select value={graphRelationType} onValueChange={setGraphRelationType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {predefinedRelationshipTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{type.replace(/_/g, " ")}</SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {graphRelationType === CUSTOM_RELATION_TYPE && (
+              <div className="space-y-2">
+                <Label>Custom relation type</Label>
+                <Input value={graphCustomRelationType} onChange={(event) => setGraphCustomRelationType(event.target.value)} />
+              </div>
+            )}
+            <Button onClick={handleCreateGraphRelationship} disabled={creatingGraphRelation} className="w-full">
+              {creatingGraphRelation && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create relationship
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={graphRenameOpen} onOpenChange={setGraphRenameOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Rename Definition</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Definition name</Label>
+              <Input value={graphRenameTitle} onChange={(event) => setGraphRenameTitle(event.target.value)} />
+            </div>
+            <Button onClick={handleRenameGraphDefinition} disabled={renamingGraphDefinition} className="w-full">
+              {renamingGraphDefinition && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save definition name
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

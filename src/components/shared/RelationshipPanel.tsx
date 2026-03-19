@@ -12,8 +12,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from "sonner";
 import { emitAppDataChanged } from "@/lib/entity-events";
 import {
-  buildRelationshipPayload,
+  createRelationshipRecord,
   CUSTOM_RELATION_TYPE,
+  deleteRelationshipRecord,
   formatRelationshipType,
   getRelationshipDisplayLabel,
   predefinedRelationshipTypes,
@@ -99,17 +100,14 @@ export function RelationshipPanel({
     }
 
     setCreating(true);
-    const { error } = await supabase.from("relationships").insert(
-      buildRelationshipPayload({
+    try {
+      await createRelationshipRecord(supabase, {
         sourceId: entityId,
         targetId: selectedTarget.id,
         selectedType: relType as any,
         customType: customRelationType,
         createdBy: user.id,
-      }),
-    );
-    if (error) toast.error(error.message);
-    else {
+      });
       toast.success("Relationship added");
       setDialogOpen(false);
       setSelectedTarget(null);
@@ -118,16 +116,33 @@ export function RelationshipPanel({
       setRelType(predefinedRelationshipTypes[0]);
       emitAppDataChanged({ entityType: "relationship", action: "created", entityId: selectedTarget.id });
       onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to add relationship");
     }
     setCreating(false);
   };
 
   const handleDelete = async (relId: string) => {
-    const { error } = await supabase.from("relationships").delete().eq("id", relId);
-    if (error) toast.error(error.message);
-    else {
+    const relationship = relationships.find((item) => item.id === relId);
+
+    if (!relationship) {
+      toast.error("Relationship not found");
+      return;
+    }
+
+    try {
+      await deleteRelationshipRecord(supabase, {
+        relationshipId: relId,
+        sourceId: relationship.source_id,
+        targetId: relationship.target_id,
+        type: relationship.type,
+        label: relationship.label,
+        deletedBy: user?.id,
+      });
       emitAppDataChanged({ entityType: "relationship", action: "deleted", entityId: relId });
       onRefresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to remove relationship");
     }
   };
 

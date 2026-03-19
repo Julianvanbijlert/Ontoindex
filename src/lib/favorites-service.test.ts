@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchFavoriteItems, toggleFavorite } from "@/lib/favorites-service";
+import { fetchFavoriteItems, filterAndSortFavorites, toggleFavorite } from "@/lib/favorites-service";
 
 describe("favorites-service", () => {
   it("upserts ontology likes into favorites", async () => {
@@ -37,6 +37,9 @@ describe("favorites-service", () => {
             title: "Security Ontology",
             description: "Ontology favorite",
             status: "approved",
+            updated_at: "2026-03-19T10:00:00.000Z",
+            view_count: 12,
+            tags: ["security"],
           },
         },
       ],
@@ -59,8 +62,56 @@ describe("favorites-service", () => {
         description: "Ontology favorite",
         status: "approved",
         createdAt: "2026-03-19T09:00:00.000Z",
+        updatedAt: "2026-03-19T10:00:00.000Z",
+        viewCount: 12,
+        tags: ["security"],
+        ontologyId: "onto-1",
+        ontologyTitle: "Security Ontology",
       },
     ]);
   });
-});
 
+  it("filters and orders favorites by type, tag, and latest update", () => {
+    const result = filterAndSortFavorites(
+      [
+        {
+          favoriteId: "fav-1",
+          entityId: "def-1",
+          entityType: "definition",
+          title: "Access Policy",
+          description: "Policy",
+          status: "approved",
+          createdAt: "2026-03-19T08:00:00.000Z",
+          updatedAt: "2026-03-19T11:00:00.000Z",
+          viewCount: 4,
+          tags: ["security"],
+          ontologyId: "onto-1",
+          ontologyTitle: "Security Ontology",
+        },
+        {
+          favoriteId: "fav-2",
+          entityId: "onto-2",
+          entityType: "ontology",
+          title: "Business Ontology",
+          description: "Business",
+          status: "draft",
+          createdAt: "2026-03-19T09:00:00.000Z",
+          updatedAt: "2026-03-19T09:30:00.000Z",
+          viewCount: 8,
+          tags: ["business"],
+          ontologyId: "onto-2",
+          ontologyTitle: "Business Ontology",
+        },
+      ],
+      {
+        type: "definition",
+        ontologyId: "onto-1",
+        tag: "security",
+        status: "approved",
+        sortBy: "updated_recent",
+      },
+    );
+
+    expect(result.map((item) => item.favoriteId)).toEqual(["fav-1"]);
+  });
+});

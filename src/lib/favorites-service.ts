@@ -19,6 +19,19 @@ export interface FavoriteListItem {
   description: string;
   status: string | null;
   createdAt: string;
+  updatedAt: string;
+  viewCount: number;
+  tags: string[];
+  ontologyId: string | null;
+  ontologyTitle: string | null;
+}
+
+export interface FavoriteFilters {
+  type: "all" | "definition" | "ontology";
+  ontologyId: string;
+  tag: string;
+  status: string;
+  sortBy: "liked_recent" | "updated_recent" | "alphabetical" | "most_viewed" | "workflow_status";
 }
 
 export async function toggleFavorite(
@@ -49,7 +62,7 @@ export async function toggleFavorite(
 export async function fetchFavoriteItems(client: AppSupabaseClient, userId: string) {
   const { data, error } = await client
     .from("favorites")
-    .select("id, created_at, definition_id, ontology_id, definitions(id, title, description, status), ontologies(id, title, description, status)")
+    .select("id, created_at, definition_id, ontology_id, definitions(id, title, description, status, updated_at, view_count, tags, ontology_id, ontologies(id, title)), ontologies(id, title, description, status, updated_at, view_count, tags)")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -68,6 +81,11 @@ export async function fetchFavoriteItems(client: AppSupabaseClient, userId: stri
           description: favorite.definitions.description || "",
           status: favorite.definitions.status,
           createdAt: favorite.created_at,
+          updatedAt: favorite.definitions.updated_at,
+          viewCount: favorite.definitions.view_count || 0,
+          tags: favorite.definitions.tags || [],
+          ontologyId: favorite.definitions.ontology_id || favorite.definitions.ontologies?.id || null,
+          ontologyTitle: favorite.definitions.ontologies?.title || null,
         };
       }
 
@@ -80,6 +98,11 @@ export async function fetchFavoriteItems(client: AppSupabaseClient, userId: stri
           description: favorite.ontologies.description || "",
           status: favorite.ontologies.status,
           createdAt: favorite.created_at,
+          updatedAt: favorite.ontologies.updated_at,
+          viewCount: favorite.ontologies.view_count || 0,
+          tags: favorite.ontologies.tags || [],
+          ontologyId: favorite.ontologies.id,
+          ontologyTitle: favorite.ontologies.title,
         };
       }
 
@@ -90,3 +113,40 @@ export async function fetchFavoriteItems(client: AppSupabaseClient, userId: stri
   return items;
 }
 
+export function filterAndSortFavorites(items: FavoriteListItem[], filters: FavoriteFilters) {
+  const filtered = items.filter((item) => {
+    if (filters.type !== "all" && item.entityType !== filters.type) {
+      return false;
+    }
+
+    if (filters.ontologyId !== "all" && item.ontologyId !== filters.ontologyId) {
+      return false;
+    }
+
+    if (filters.tag !== "all" && !item.tags.includes(filters.tag)) {
+      return false;
+    }
+
+    if (filters.status !== "all" && item.status !== filters.status) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return filtered.sort((left, right) => {
+    switch (filters.sortBy) {
+      case "updated_recent":
+        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+      case "alphabetical":
+        return left.title.localeCompare(right.title);
+      case "most_viewed":
+        return right.viewCount - left.viewCount;
+      case "workflow_status":
+        return (left.status || "").localeCompare(right.status || "");
+      case "liked_recent":
+      default:
+        return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    }
+  });
+}

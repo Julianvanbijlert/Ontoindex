@@ -27,6 +27,7 @@ export const notificationTypeConfig: Record<
   definition_status_changed: { icon: RefreshCcw, label: "Definition status changed", color: "text-warning" },
   ontology_changed: { icon: GitBranch, label: "Ontology changed", color: "text-accent" },
   definition_comment: { icon: MessageSquare, label: "Definition comment", color: "text-primary" },
+  review_assignment: { icon: Bell, label: "Review assignment", color: "text-primary" },
 };
 
 export async function fetchNotifications(client: AppSupabaseClient, userId: string, limit?: number) {

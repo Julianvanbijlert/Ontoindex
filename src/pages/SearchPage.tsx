@@ -5,6 +5,7 @@ import { Clock, Network, Search as SearchIcon, X } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  fetchRecentFinds,
   fetchSearchHistory,
   fetchSearchOptions,
   filterSearchHistory,
@@ -38,6 +39,7 @@ export default function SearchPage() {
   const [typeFilter, setTypeFilter] = useState<"all" | "definition" | "ontology">("all");
   const [sortBy, setSortBy] = useState<SearchSort>("relevance");
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
+  const [recentFinds, setRecentFinds] = useState<SearchResultItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [highlightedHistoryIndex, setHighlightedHistoryIndex] = useState(-1);
   const [ontologies, setOntologies] = useState<Array<{ id: string; title: string }>>([]);
@@ -60,6 +62,16 @@ export default function SearchPage() {
 
     const history = await fetchSearchHistory(supabase, user.id);
     setSearchHistory(history);
+  };
+
+  const refreshRecentFinds = async () => {
+    if (!user) {
+      setRecentFinds([]);
+      return;
+    }
+
+    const recent = await fetchRecentFinds(supabase, user.id);
+    setRecentFinds(recent);
   };
 
   const performSearch = async (overrideQuery?: string) => {
@@ -100,16 +112,18 @@ export default function SearchPage() {
 
   useEffect(() => {
     refreshHistory();
+    refreshRecentFinds();
   }, [user]);
 
   useEffect(() => {
     if (!hasActiveSearch) {
-      setResults([]);
+      setHasSubmittedSearch(false);
+      setResults(recentFinds);
       return;
     }
 
     performSearch();
-  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy]);
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy, recentFinds]);
 
   useEffect(() => {
     return subscribeToAppDataChanges(() => {
@@ -118,11 +132,13 @@ export default function SearchPage() {
         setAvailableTags(options.tags);
       });
 
+      refreshRecentFinds();
+
       if (hasActiveSearch) {
         performSearch();
       }
     });
-  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy, hasActiveSearch]);
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy, hasActiveSearch, user]);
 
   const handleSubmitSearch = async (explicitQuery?: string) => {
     const nextQuery = explicitQuery ?? query;
@@ -322,7 +338,21 @@ export default function SearchPage() {
           description={`No definitions or ontologies matched "${query}".`}
         />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
+          {!hasActiveSearch && (
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Recent finds</h2>
+              <p className="text-xs text-muted-foreground">The most recently opened or changed items are shown here first.</p>
+            </div>
+          )}
+          {!hasActiveSearch && results.length === 0 ? (
+            <EmptyState
+              icon={<Clock className="w-6 h-6" />}
+              title="No recent finds"
+              description="Recently viewed definitions and ontologies will appear here."
+            />
+          ) : (
+            <div className="space-y-2">
           {results.map((result) => (
             <Card
               key={`${result.type}-${result.id}`}
@@ -355,6 +385,8 @@ export default function SearchPage() {
               </CardContent>
             </Card>
           ))}
+            </div>
+          )}
         </div>
       )}
     </div>

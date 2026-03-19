@@ -12,6 +12,7 @@ import {
   type ImportResult,
 } from "@/lib/import-service";
 import { supabase } from "@/integrations/supabase/client";
+import { ImportFactory } from "@/lib/import-factory";
 
 interface ImportDialogProps {
   open: boolean;
@@ -21,18 +22,22 @@ interface ImportDialogProps {
   onImport?: (result: ImportResult) => void;
 }
 
-const formatCards = [
-  { format: "csv", label: "CSV", description: "Comma-separated values", icon: Table },
-  { format: "excel", label: "Excel", description: "XLSX spreadsheet", icon: FileText },
-];
-
-const formatAccept: Record<string, string> = {
-  csv: ".csv",
-  excel: ".xlsx,.xls",
+const iconByFormat: Record<string, React.ElementType> = {
+  csv: Table,
+  excel: FileText,
+  turtle: FileText,
+  jsonld: FileText,
+  rdfxml: FileText,
+  ntriples: FileText,
+  owl: FileText,
+  skos: FileText,
+  xmi: FileText,
 };
 
 export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, onImport }: ImportDialogProps) {
-  const [selectedFormat, setSelectedFormat] = useState("csv");
+  const formats = ImportFactory.getAll();
+  const accept = formats.flatMap((format) => format.extensions).join(",");
+  const [selectedFormat, setSelectedFormat] = useState(formats[0]?.format || "csv");
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -42,8 +47,7 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
   const processFile = async (nextFile: File) => {
     setFile(nextFile);
     setProcessing(true);
-    const lowerName = nextFile.name.toLowerCase();
-    setSelectedFormat(lowerName.endsWith(".csv") ? "csv" : "excel");
+    setSelectedFormat(ImportFactory.createFromFile(nextFile).format);
 
     const res = await importDefinitionsToOntology(supabase, ontologyId, nextFile);
     setResult(res);
@@ -63,12 +67,15 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
         <DialogHeader>
           <DialogTitle>Import Definitions into {ontologyTitle}</DialogTitle>
           <DialogDescription>
-            Upload a CSV or Excel file to create definitions directly inside this ontology.
+            Upload business or enterprise interchange files to create definitions and relationships inside this ontology.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-2">
-          <div className="grid grid-cols-2 gap-2">
-            {formatCards.map(f => (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {formats.map(f => {
+              const Icon = iconByFormat[f.format] || FileText;
+
+              return (
               <Card
                 key={f.format}
                 className={cn(
@@ -78,12 +85,12 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
                 onClick={() => { setSelectedFormat(f.format); setFile(null); setResult(null); }}
               >
                 <CardContent className="p-3 text-center">
-                  <f.icon className={cn("h-5 w-5 mx-auto mb-1", selectedFormat === f.format ? "text-primary" : "text-muted-foreground")} />
+                  <Icon className={cn("h-5 w-5 mx-auto mb-1", selectedFormat === f.format ? "text-primary" : "text-muted-foreground")} />
                   <p className="text-xs font-medium text-foreground">{f.label}</p>
-                  <p className="text-[10px] text-muted-foreground">{f.description}</p>
+                  <p className="text-[10px] text-muted-foreground">{f.extensions.join(", ")}</p>
                 </CardContent>
               </Card>
-            ))}
+            )})}
           </div>
 
           <div
@@ -122,7 +129,7 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
               ref={inputRef}
               type="file"
               className="hidden"
-              accept={formatAccept[selectedFormat]}
+              accept={accept}
               onChange={async (event) => {
                 const nextFile = event.target.files?.[0];
                 setResult(null);
@@ -135,7 +142,7 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
             {file ? (
               <p className="text-sm text-foreground font-medium">{file.name}</p>
             ) : (
-              <p className="text-sm text-muted-foreground">Drag and drop a CSV or Excel file here, or click to upload</p>
+              <p className="text-sm text-muted-foreground">Drag and drop a supported ontology file here, or click to upload</p>
             )}
           </div>
 

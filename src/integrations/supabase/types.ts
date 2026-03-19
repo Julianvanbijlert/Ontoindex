@@ -47,6 +47,60 @@ export type Database = {
         }
         Relationships: []
       }
+      approval_request_assignments: {
+        Row: {
+          approval_request_id: string
+          created_at: string
+          definition_id: string
+          id: string
+          review_message: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          reviewer_team: string | null
+          reviewer_user_id: string | null
+          status: Database["public"]["Enums"]["review_assignment_status"]
+        }
+        Insert: {
+          approval_request_id: string
+          created_at?: string
+          definition_id: string
+          id?: string
+          review_message?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewer_team?: string | null
+          reviewer_user_id?: string | null
+          status?: Database["public"]["Enums"]["review_assignment_status"]
+        }
+        Update: {
+          approval_request_id?: string
+          created_at?: string
+          definition_id?: string
+          id?: string
+          review_message?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewer_team?: string | null
+          reviewer_user_id?: string | null
+          status?: Database["public"]["Enums"]["review_assignment_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_request_assignments_approval_request_id_fkey"
+            columns: ["approval_request_id"]
+            isOneToOne: false
+            referencedRelation: "approval_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "approval_request_assignments_definition_id_fkey"
+            columns: ["definition_id"]
+            isOneToOne: false
+            referencedRelation: "definitions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       approval_requests: {
         Row: {
           created_at: string
@@ -604,6 +658,23 @@ export type Database = {
         }
         Returns: Json
       }
+      set_review_assignment_decision: {
+        Args: {
+          _assignment_id: string
+          _decision: Database["public"]["Enums"]["review_assignment_status"]
+          _review_message?: string
+        }
+        Returns: Json
+      }
+      upsert_definition_review_request: {
+        Args: {
+          _definition_id: string
+          _message?: string
+          _reviewer_teams?: string[]
+          _reviewer_user_ids?: string[]
+        }
+        Returns: Json
+      }
       update_my_role: {
         Args: {
           _target_role: Database["public"]["Enums"]["app_role"]
@@ -614,6 +685,7 @@ export type Database = {
     Enums: {
       app_role: "admin" | "reviewer" | "editor" | "viewer"
       priority_level: "low" | "normal" | "high" | "critical"
+      review_assignment_status: "pending" | "accepted" | "rejected"
       relationship_type:
         | "is_a"
         | "part_of"
@@ -757,6 +829,7 @@ export const Constants = {
     Enums: {
       app_role: ["admin", "reviewer", "editor", "viewer"],
       priority_level: ["low", "normal", "high", "critical"],
+      review_assignment_status: ["pending", "accepted", "rejected"],
       relationship_type: [
         "is_a",
         "part_of",

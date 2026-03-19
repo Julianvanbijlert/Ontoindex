@@ -1,4 +1,4 @@
-import { Clock, Edit2, GitPullRequest, MessageSquare, Heart, GitBranch, Plus } from "lucide-react";
+import { Clock, Edit2, GitPullRequest, MessageSquare, Heart, GitBranch, Plus, Search } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +17,11 @@ const actionConfig: Record<string, { icon: React.ElementType; color: string; lab
   comment_added: { icon: MessageSquare, color: "bg-primary/10 text-primary", label: "Comment added" },
   relationship_added: { icon: GitBranch, color: "bg-accent/10 text-accent", label: "Relationship added" },
   relationship_removed: { icon: GitBranch, color: "bg-destructive/10 text-destructive", label: "Relationship removed" },
+  requested_review: { icon: GitPullRequest, color: "bg-warning/10 text-warning", label: "Approval requested" },
+  accepted_review: { icon: GitPullRequest, color: "bg-success/10 text-success", label: "Approval accepted" },
+  rejected_review: { icon: GitPullRequest, color: "bg-destructive/10 text-destructive", label: "Approval rejected" },
+  viewed: { icon: Search, color: "bg-muted text-muted-foreground", label: "Viewed" },
+  imported: { icon: Plus, color: "bg-info/10 text-info", label: "Imported" },
   liked: { icon: Heart, color: "bg-destructive/10 text-destructive", label: "Liked" },
   favorited: { icon: Heart, color: "bg-destructive/10 text-destructive", label: "Favorited" },
 };
