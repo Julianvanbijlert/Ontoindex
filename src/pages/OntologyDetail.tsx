@@ -306,13 +306,23 @@ export default function OntologyDetail() {
                 timelineEvents={timelineEvents}
                 relationships={relationships}
                 onRefresh={fetchAll}
+                allowRelationshipCreate={false}
               />
             </CardContent>
           </Card>
         </div>
       </div>
 
-      <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        ontologyId={ontology.id}
+        ontologyTitle={ontology.title}
+        onImport={() => {
+          fetchAll();
+          setImportOpen(false);
+        }}
+      />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} data={definitions} entityName="definitions" />
     </div>
   );

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { toggleFavorite } from "@/lib/favorites-service";
+import { toast } from "sonner";
 
 interface LikeButtonProps {
   entityId: string;
@@ -20,25 +22,34 @@ export function LikeButton({ entityId, entityType, isLiked, likeCount, onToggle,
   const [count, setCount] = useState(likeCount ?? 0);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    setLiked(isLiked);
+  }, [isLiked]);
+
+  useEffect(() => {
+    setCount(likeCount ?? 0);
+  }, [likeCount]);
+
   const toggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user || loading) return;
     setLoading(true);
-    if (liked) {
-      const col = entityType === "definition" ? "definition_id" : "ontology_id";
-      await supabase.from("favorites").delete().eq("user_id", user.id).eq(col, entityId);
-      setLiked(false);
-      setCount(c => Math.max(0, c - 1));
-      onToggle?.(false);
+    const nextLiked = !liked;
+    const { error } = await toggleFavorite(supabase, {
+      userId: user.id,
+      entityId,
+      entityType,
+      liked: nextLiked,
+    });
+
+    if (error) {
+      toast.error(error.message);
     } else {
-      const insert: any = { user_id: user.id };
-      if (entityType === "definition") insert.definition_id = entityId;
-      else insert.ontology_id = entityId;
-      await supabase.from("favorites").insert(insert);
-      setLiked(true);
-      setCount(c => c + 1);
-      onToggle?.(true);
+      setLiked(nextLiked);
+      setCount(c => Math.max(0, c + (nextLiked ? 1 : -1)));
+      onToggle?.(nextLiked);
     }
+
     setLoading(false);
   };
 

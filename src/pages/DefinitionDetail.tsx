@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge, PriorityBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { EntityActivityPanel } from "@/components/shared/EntityActivityPanel";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { Edit2, Save, X, Loader2, Send, Eye, Network } from "lucide-react";
@@ -19,6 +18,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import type { Comment } from "@/components/shared/CommentThread";
 import type { TimelineEvent } from "@/components/shared/ActivityTimeline";
+import { CommentThread } from "@/components/shared/CommentThread";
+import { DefinitionRelationsSection } from "@/components/definition/DefinitionRelationsSection";
+import { DefinitionHistorySection } from "@/components/definition/DefinitionHistorySection";
 
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -35,14 +37,24 @@ export default function DefinitionDetail() {
   const [isFavorited, setIsFavorited] = useState(false);
   const [approvalMsg, setApprovalMsg] = useState("");
   const [requesting, setRequesting] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [relationshipsLoading, setRelationshipsLoading] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
 
   const fetchAll = async () => {
     if (!id) return;
+    setLoading(true);
+    setHistoryLoading(true);
+    setRelationshipsLoading(true);
+    setHistoryError(null);
+    setRelationshipsError(null);
+
     const [defRes, comRes, verRes, relRes, favRes] = await Promise.all([
       supabase.from("definitions").select("*, ontologies(id, title)").eq("id", id).single(),
       supabase.from("comments").select("*").eq("definition_id", id).order("created_at", { ascending: true }),
       supabase.from("version_history").select("*").eq("definition_id", id).order("version", { ascending: false }),
-      supabase.from("relationships").select("*, source:source_id(title), target:target_id(title)").or(`source_id.eq.${id},target_id.eq.${id}`),
+      supabase.from("relationships").select("id, source_id, target_id, type, label, source:source_id(id, title), target:target_id(id, title)").or(`source_id.eq.${id},target_id.eq.${id}`),
       user ? supabase.from("favorites").select("id").eq("user_id", user.id).eq("definition_id", id).maybeSingle() : Promise.resolve({ data: null }),
     ]);
 
@@ -60,6 +72,10 @@ export default function DefinitionDetail() {
     setVersions(verRes.data || []);
     setRelationships(relRes.data || []);
     setIsFavorited(!!favRes.data);
+    setHistoryError(verRes.error?.message || null);
+    setRelationshipsError(relRes.error?.message || null);
+    setHistoryLoading(false);
+    setRelationshipsLoading(false);
     setLoading(false);
   };
 
@@ -186,8 +202,7 @@ export default function DefinitionDetail() {
         />
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        {/* Main content */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
         <div className="lg:col-span-3 space-y-6">
           <Tabs defaultValue="content">
             <TabsList>
@@ -276,18 +291,32 @@ export default function DefinitionDetail() {
               </Card>
             </TabsContent>
           </Tabs>
+
+          <DefinitionRelationsSection
+            entityId={definition.id}
+            relationships={relationships}
+            loading={relationshipsLoading}
+            error={relationshipsError}
+            onRefresh={fetchAll}
+          />
+
+          <DefinitionHistorySection
+            events={timelineEvents}
+            loading={historyLoading}
+            error={historyError}
+          />
         </div>
 
-        {/* Activity panel */}
         <div className="lg:col-span-2">
           <Card className="border-border/50 sticky top-20">
-            <CardContent className="p-4">
-              <EntityActivityPanel
+            <CardHeader>
+              <CardTitle className="text-base">Comments</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <CommentThread
+                comments={comments}
                 entityId={definition.id}
                 entityType="definition"
-                comments={comments}
-                timelineEvents={timelineEvents}
-                relationships={relationships}
                 onRefresh={fetchAll}
               />
             </CardContent>

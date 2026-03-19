@@ -3,23 +3,35 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Upload, FileText, Table, Code, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
-import { ImportFactory, type ImportResult } from "@/lib/import-export";
+import { Upload, FileText, Table, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  importDefinitionsToOntology,
+  REQUIRED_IMPORT_COLUMNS,
+  SUPPORTED_IMPORT_COLUMNS,
+  type ImportResult,
+} from "@/lib/import-service";
+import { supabase } from "@/integrations/supabase/client";
 
 interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  ontologyId: string;
+  ontologyTitle: string;
   onImport?: (result: ImportResult) => void;
 }
 
 const formatCards = [
   { format: "csv", label: "CSV", description: "Comma-separated values", icon: Table },
   { format: "excel", label: "Excel", description: "XLSX spreadsheet", icon: FileText },
-  { format: "turtle", label: "Turtle", description: "RDF/Turtle format", icon: Code },
 ];
 
-export function ImportDialog({ open, onOpenChange, onImport }: ImportDialogProps) {
+const formatAccept: Record<string, string> = {
+  csv: ".csv",
+  excel: ".xlsx,.xls,.csv",
+};
+
+export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, onImport }: ImportDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState("csv");
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -29,14 +41,9 @@ export function ImportDialog({ open, onOpenChange, onImport }: ImportDialogProps
   const handleImport = async () => {
     if (!file) return;
     setProcessing(true);
-    try {
-      const importer = ImportFactory.create(selectedFormat);
-      const res = await importer.parse(file);
-      setResult(res);
-      if (res.success) onImport?.(res);
-    } catch (err: any) {
-      setResult({ success: false, imported: 0, errors: [err.message], warnings: [] });
-    }
+    const res = await importDefinitionsToOntology(supabase, ontologyId, file);
+    setResult(res);
+    if (res.success) onImport?.(res);
     setProcessing(false);
   };
 
@@ -49,9 +56,9 @@ export function ImportDialog({ open, onOpenChange, onImport }: ImportDialogProps
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader><DialogTitle>Import Definitions</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Import Definitions into {ontologyTitle}</DialogTitle></DialogHeader>
         <div className="space-y-4 mt-2">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {formatCards.map(f => (
               <Card
                 key={f.format}
@@ -74,13 +81,28 @@ export function ImportDialog({ open, onOpenChange, onImport }: ImportDialogProps
             className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
             onClick={() => inputRef.current?.click()}
           >
-            <input ref={inputRef} type="file" className="hidden" accept={ImportFactory.create(selectedFormat).extensions.join(",")} onChange={e => { setFile(e.target.files?.[0] || null); setResult(null); }} />
+            <input ref={inputRef} type="file" className="hidden" accept={formatAccept[selectedFormat]} onChange={e => { setFile(e.target.files?.[0] || null); setResult(null); }} />
             <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
             {file ? (
               <p className="text-sm text-foreground font-medium">{file.name}</p>
             ) : (
               <p className="text-sm text-muted-foreground">Click to select a file or drag and drop</p>
             )}
+          </div>
+
+          <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-xs text-muted-foreground space-y-2">
+            <p>
+              Required columns:
+              {REQUIRED_IMPORT_COLUMNS.map((column) => (
+                <Badge key={column} variant="secondary" className="ml-1 text-[10px]">{column}</Badge>
+              ))}
+            </p>
+            <p>
+              Supported columns:
+              {SUPPORTED_IMPORT_COLUMNS.map((column) => (
+                <Badge key={column} variant="outline" className="ml-1 text-[10px]">{column}</Badge>
+              ))}
+            </p>
           </div>
 
           {result && (

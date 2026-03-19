@@ -11,6 +11,7 @@ interface EntityActivityPanelProps {
   timelineEvents: TimelineEvent[];
   relationships: any[];
   onRefresh: () => void;
+  allowRelationshipCreate?: boolean;
 }
 
 export function EntityActivityPanel({
@@ -20,6 +21,7 @@ export function EntityActivityPanel({
   timelineEvents,
   relationships,
   onRefresh,
+  allowRelationshipCreate = true,
 }: EntityActivityPanelProps) {
   return (
     <Tabs defaultValue="comments" className="w-full">
@@ -56,6 +58,7 @@ export function EntityActivityPanel({
           entityId={entityId}
           relationships={relationships}
           onRefresh={onRefresh}
+          allowCreate={allowRelationshipCreate}
         />
       </TabsContent>
     </Tabs>

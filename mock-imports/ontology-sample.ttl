@@ -1,0 +1,7 @@
+@prefix onto: <http://example.org/ontology/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+onto:UserAuthentication
+  rdfs:label "User Authentication" ;
+  rdfs:comment "Sample Turtle file for testing the current import dialog." .
+

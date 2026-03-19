@@ -578,6 +578,20 @@ export type Database = {
         }
         Returns: boolean
       }
+      import_definitions_to_ontology: {
+        Args: {
+          _ontology_id: string
+          _rows: Json
+        }
+        Returns: Json
+      }
+      save_search_history: {
+        Args: {
+          _filters?: Json
+          _query: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "admin" | "reviewer" | "editor" | "viewer"

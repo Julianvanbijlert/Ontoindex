@@ -110,7 +110,23 @@ export default function Ontologies() {
                     <Network className="w-4 h-4 text-accent" />
                   </div>
                   <div className="flex items-center gap-2">
-                    <LikeButton entityId={o.id} entityType="ontology" isLiked={favorites.has(o.id)} size="sm" />
+                    <LikeButton
+                      entityId={o.id}
+                      entityType="ontology"
+                      isLiked={favorites.has(o.id)}
+                      size="sm"
+                      onToggle={(liked) => {
+                        setFavorites((previous) => {
+                          const next = new Set(previous);
+                          if (liked) {
+                            next.add(o.id);
+                          } else {
+                            next.delete(o.id);
+                          }
+                          return next;
+                        });
+                      }}
+                    />
                     <StatusBadge status={o.status} />
                   </div>
                 </div>
