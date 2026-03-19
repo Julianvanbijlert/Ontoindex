@@ -9,7 +9,7 @@ import { StatusBadge, PriorityBadge } from "@/components/shared/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { BookOpen, Search, Eye, Network, LayoutGrid, List, SlidersHorizontal, ArrowUpAZ, ArrowDownAZ, Group } from "lucide-react";
+import { BookOpen, Search, Eye, Network, LayoutGrid, List, SlidersHorizontal, ArrowUpAZ, ArrowDownAZ, Group, Maximize2, Minimize2, Square } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { subscribeToAppDataChanges } from "@/lib/entity-events";
@@ -153,10 +153,19 @@ export default function Definitions() {
             <div className="h-4 w-[1px] bg-border" />
 
             <Tabs value={viewSize} onValueChange={v => setViewSize(v as any)}>
-              <TabsList className="h-8 bg-muted/50">
-                <TabsTrigger value="small" className="text-[10px] px-2 h-6">Small</TabsTrigger>
-                <TabsTrigger value="medium" className="text-[10px] px-2 h-6">Medium</TabsTrigger>
-                <TabsTrigger value="large" className="text-[10px] px-2 h-6">Large</TabsTrigger>
+              <TabsList className="h-9 bg-muted/50 p-1">
+                <TabsTrigger value="small" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                  <LayoutGrid className="h-3 w-3" />
+                  Small
+                </TabsTrigger>
+                <TabsTrigger value="medium" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  Medium
+                </TabsTrigger>
+                <TabsTrigger value="large" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                  <Square className="h-4 w-4" />
+                  Large
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -206,26 +215,38 @@ export default function Definitions() {
               
               <div className={cn(
                 "gap-4",
-                viewFormat === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" : "flex flex-col"
+                viewFormat === "grid" 
+                  ? viewSize === "small" 
+                    ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" 
+                    : viewSize === "large"
+                      ? "grid grid-cols-1 lg:grid-cols-2"
+                      : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+                  : "flex flex-col"
               )}>
                 {groupItems.map((d: any) => (
                   <Card 
                     key={d.id} 
                     className={cn(
-                      "group border-border/50 hover:border-primary/50 transition-all cursor-pointer overflow-hidden",
-                      viewSize === "small" ? "p-3" : viewSize === "large" ? "p-6" : "p-4"
+                      "group border-border/50 hover:border-primary/50 transition-all cursor-pointer overflow-hidden flex flex-col",
+                      viewSize === "small" ? "p-2 gap-2" : viewSize === "large" ? "p-8 gap-6" : "p-4 gap-3"
                     )} 
                     onClick={() => navigate(`/definitions/${d.id}`)}
                   >
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1">
-                          <h3 className={cn("font-semibold text-foreground group-hover:text-primary transition-colors", viewSize === "large" ? "text-lg" : "text-sm")}>
+                    <div className={cn(
+                      "flex flex-col",
+                      viewSize === "small" ? "gap-1.5" : viewSize === "large" ? "gap-6" : "gap-3"
+                    )}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className={viewSize === "small" ? "space-y-0.5" : "space-y-1"}>
+                          <h3 className={cn(
+                            "font-semibold text-foreground group-hover:text-primary transition-colors", 
+                            viewSize === "large" ? "text-2xl" : viewSize === "small" ? "text-xs" : "text-sm"
+                          )}>
                             {d.title}
                           </h3>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <StatusBadge status={d.status} />
-                            <PriorityBadge priority={d.priority} />
+                          <div className="flex flex-wrap items-center gap-1">
+                            <StatusBadge status={d.status} className={viewSize === "small" ? "scale-75 origin-left" : ""} />
+                            {viewSize !== "small" && <PriorityBadge priority={d.priority} />}
                           </div>
                         </div>
                         <LikeButton
@@ -239,27 +260,43 @@ export default function Definitions() {
                               return n;
                             });
                           }}
+                          className={viewSize === "small" ? "scale-75" : ""}
                         />
                       </div>
                       
-                      <p className={cn(
-                        "text-muted-foreground line-clamp-2",
-                        viewSize === "small" ? "text-xs" : "text-sm"
-                      )}>
-                        {d.description || "No description provided"}
-                      </p>
+                      {viewSize !== "small" && (
+                        <p className={cn(
+                          "text-muted-foreground",
+                          viewSize === "large" ? "text-base" : "text-sm line-clamp-2"
+                        )}>
+                          {d.description || "No description provided"}
+                        </p>
+                      )}
                       
-                      <div className="flex items-center justify-between mt-1 pt-2 border-t border-border/50">
-                        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                      <div className={cn(
+                        "flex items-center justify-between border-t border-border/50",
+                        viewSize === "small" ? "mt-0 pt-1.5" : viewSize === "large" ? "mt-2 pt-4" : "mt-1 pt-2"
+                      )}>
+                        <div className={cn(
+                          "flex items-center gap-3 text-muted-foreground",
+                          viewSize === "small" ? "text-[8px] gap-1.5" : "text-[10px]"
+                        )}>
                           {d.ontologies && (
                             <span className="inline-flex items-center gap-1 bg-muted px-1.5 py-0.5 rounded">
-                              <Network className="h-3 w-3" />{d.ontologies.title}
+                              <Network className={viewSize === "small" ? "h-2 w-2" : "h-3 w-3"} />{d.ontologies.title}
                             </span>
                           )}
-                          <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{d.view_count}</span>
-                          <span>{new Date(d.updated_at).toLocaleDateString()}</span>
+                          {viewSize !== "small" && (
+                            <>
+                              <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{d.view_count}</span>
+                              <span>{new Date(d.updated_at).toLocaleDateString()}</span>
+                            </>
+                          )}
                         </div>
-                        <Badge variant="outline" className="text-[9px] h-4">v{d.version}</Badge>
+                        <Badge variant="outline" className={cn(
+                          "h-auto",
+                          viewSize === "small" ? "text-[7px] py-0 px-1" : "text-[9px] py-0.5 px-1.5"
+                        )}>v{d.version}</Badge>
                       </div>
                     </div>
                   </Card>

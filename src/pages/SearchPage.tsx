@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Clock, Network, Search as SearchIcon, X, LayoutGrid, List, SlidersHorizontal, Eye } from "lucide-react";
+import { Clock, Network, Search as SearchIcon, X, LayoutGrid, List, SlidersHorizontal, Eye, Square } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -248,10 +248,19 @@ export default function SearchPage() {
           </div>
 
           <Tabs value={viewSize} onValueChange={v => setViewSize(v as any)}>
-            <TabsList className="h-7 bg-muted/40 border border-border/50">
-              <TabsTrigger value="small" className="text-[9px] px-2 h-5">S</TabsTrigger>
-              <TabsTrigger value="medium" className="text-[9px] px-2 h-5">M</TabsTrigger>
-              <TabsTrigger value="large" className="text-[9px] px-2 h-5">L</TabsTrigger>
+            <TabsList className="h-9 bg-muted/40 p-1 border border-border/50">
+              <TabsTrigger value="small" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                <LayoutGrid className="h-3 w-3" />
+                Small
+              </TabsTrigger>
+              <TabsTrigger value="medium" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                <LayoutGrid className="h-3.5 w-3.5" />
+                Medium
+              </TabsTrigger>
+              <TabsTrigger value="large" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                <Square className="h-4 w-4" />
+                Large
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -386,7 +395,13 @@ export default function SearchPage() {
       ) : (
         <div className={cn(
           "gap-4",
-          viewFormat === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" : "flex flex-col"
+          viewFormat === "grid" 
+            ? viewSize === "small" 
+              ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" 
+              : viewSize === "large"
+                ? "grid grid-cols-1 lg:grid-cols-2"
+                : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+            : "flex flex-col"
         )}>
           {results.map((result) => (
             <Card
@@ -402,41 +417,62 @@ export default function SearchPage() {
                 viewSize === "small" ? "p-3" : viewSize === "large" ? "p-6" : "p-4"
               )}>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <h3 className={cn("font-semibold text-foreground group-hover:text-primary transition-colors", viewSize === "large" ? "text-lg" : "text-sm")}>
+                  <div className={viewSize === "small" ? "space-y-0.5" : "space-y-1"}>
+                    <h3 className={cn(
+                      "font-semibold text-foreground group-hover:text-primary transition-colors", 
+                      viewSize === "large" ? "text-2xl" : viewSize === "small" ? "text-xs" : "text-sm"
+                    )}>
                       {result.title}
                     </h3>
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <Badge variant="outline" className="text-[9px] px-1 h-3.5 bg-muted/30">
+                      <Badge variant="outline" className={cn(
+                        "px-1 bg-muted/30",
+                        viewSize === "small" ? "text-[7px] h-3" : "text-[9px] h-3.5"
+                      )}>
                         {result.type === "ontology" ? "Ontology" : "Definition"}
                       </Badge>
-                      <StatusBadge status={result.status} />
-                      {result.type === "definition" && result.priority && <PriorityBadge priority={result.priority as any} />}
+                      <StatusBadge status={result.status} className={viewSize === "small" ? "scale-75 origin-left" : ""} />
+                      {viewSize !== "small" && result.type === "definition" && result.priority && <PriorityBadge priority={result.priority as any} />}
                     </div>
                   </div>
                 </div>
 
-                <p className={cn(
-                  "text-muted-foreground line-clamp-2",
-                  viewSize === "small" ? "text-xs" : "text-sm"
-                )}>
-                  {result.description || "No description provided"}
-                </p>
+                {viewSize !== "small" && (
+                  <p className={cn(
+                    "text-muted-foreground",
+                    viewSize === "large" ? "text-base" : "text-sm line-clamp-2"
+                  )}>
+                    {result.description || "No description provided"}
+                  </p>
+                )}
 
-                <div className="flex items-center justify-between mt-1 pt-2 border-t border-border/50">
-                  <div className="flex flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+                <div className={cn(
+                  "flex items-center justify-between border-t border-border/50",
+                  viewSize === "small" ? "mt-0 pt-1.5" : viewSize === "large" ? "mt-2 pt-4" : "mt-1 pt-2"
+                )}>
+                  <div className={cn(
+                    "flex flex-wrap items-center text-muted-foreground",
+                    viewSize === "small" ? "text-[8px] gap-1.5" : "text-[10px] gap-3"
+                  )}>
                     {result.type === "definition" && result.ontologyTitle && (
                       <span className="inline-flex items-center gap-1 bg-muted px-1.5 py-0.5 rounded">
-                        <Network className="h-3 w-3" />
+                        <Network className={viewSize === "small" ? "h-2 w-2" : "h-3 w-3"} />
                         {result.ontologyTitle}
                       </span>
                     )}
-                    <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{result.viewCount}</span>
-                    <span>{new Date(result.updatedAt).toLocaleDateString()}</span>
+                    {viewSize !== "small" && (
+                      <>
+                        <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{result.viewCount}</span>
+                        <span>{new Date(result.updatedAt).toLocaleDateString()}</span>
+                      </>
+                    )}
                   </div>
                   <div className="flex gap-1">
-                    {result.tags.slice(0, 2).map((tag) => (
-                      <Badge key={tag} variant="secondary" className="text-[9px] px-1 h-3.5">{tag}</Badge>
+                    {result.tags.slice(0, viewSize === "large" ? 4 : 1).map((tag) => (
+                      <Badge key={tag} variant="secondary" className={cn(
+                        "px-1",
+                        viewSize === "small" ? "text-[7px] h-3" : "text-[9px] h-3.5"
+                      )}>{tag}</Badge>
                     ))}
                   </div>
                 </div>

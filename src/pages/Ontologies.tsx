@@ -143,10 +143,19 @@ export default function Ontologies() {
           </div>
 
           <Tabs value={viewSize} onValueChange={v => setViewSize(v as any)}>
-            <TabsList className="h-8 bg-muted/50 border border-border/40">
-              <TabsTrigger value="small" className="text-[10px] px-3 h-6">S</TabsTrigger>
-              <TabsTrigger value="medium" className="text-[10px] px-3 h-6">M</TabsTrigger>
-              <TabsTrigger value="large" className="text-[10px] px-3 h-6">L</TabsTrigger>
+            <TabsList className="h-9 bg-muted/50 p-1 border border-border/40">
+              <TabsTrigger value="small" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                <LayoutGrid className="h-3 w-3" />
+                Small
+              </TabsTrigger>
+              <TabsTrigger value="medium" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                <LayoutGrid className="h-3.5 w-3.5" />
+                Medium
+              </TabsTrigger>
+              <TabsTrigger value="large" className="h-7 px-3 gap-1.5 text-[11px] font-medium">
+                <Square className="h-4 w-4" />
+                Large
+              </TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -190,7 +199,11 @@ export default function Ontologies() {
               <div className={cn(
                 "gap-4",
                 viewFormat === "grid" 
-                  ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" 
+                  ? viewSize === "small" 
+                    ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" 
+                    : viewSize === "large"
+                      ? "grid grid-cols-1 lg:grid-cols-2"
+                      : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
                   : "flex flex-col"
               )}>
                 {groupItems.map((o: any) => (
@@ -211,10 +224,13 @@ export default function Ontologies() {
                             <Network className={cn("text-primary", viewSize === "small" ? "w-3 h-3" : "w-5 h-5")} />
                           </div>
                           <div>
-                            <h3 className={cn("font-bold text-foreground group-hover:text-primary transition-colors", viewSize === "large" ? "text-lg" : "text-sm")}>{o.title}</h3>
+                            <h3 className={cn(
+                              "font-bold text-foreground group-hover:text-primary transition-colors", 
+                              viewSize === "large" ? "text-2xl" : viewSize === "small" ? "text-xs" : "text-sm"
+                            )}>{o.title}</h3>
                             <div className="flex items-center gap-1.5 pt-0.5">
-                              <StatusBadge status={o.status} />
-                              <span className="text-[9px] text-muted-foreground">{new Date(o.updated_at).toLocaleDateString()}</span>
+                              <StatusBadge status={o.status} className={viewSize === "small" ? "scale-75 origin-left" : ""} />
+                              {viewSize !== "small" && <span className="text-[9px] text-muted-foreground">{new Date(o.updated_at).toLocaleDateString()}</span>}
                             </div>
                           </div>
                         </div>
@@ -234,15 +250,21 @@ export default function Ontologies() {
                       </div>
 
                       {viewSize !== "small" && (
-                        <p className={cn("text-muted-foreground line-clamp-2", viewSize === "large" ? "text-sm" : "text-xs")}>{o.description || "No description provided"}</p>
+                        <p className={cn(
+                          "text-muted-foreground", 
+                          viewSize === "large" ? "text-base" : "text-xs line-clamp-2"
+                        )}>{o.description || "No description provided"}</p>
                       )}
 
-                      <div className="flex items-center justify-between mt-auto pt-2 border-t border-border/40">
+                      <div className={cn(
+                        "flex items-center justify-between mt-auto border-t border-border/40",
+                        viewSize === "small" ? "pt-1.5 mt-0" : viewSize === "large" ? "pt-4 mt-2" : "pt-2 mt-auto"
+                      )}>
                         <div className="flex flex-wrap gap-1">
-                          {(o.tags || []).slice(0, 2).map((t: string) => <Badge key={t} variant="secondary" className="text-[9px] px-1.5 h-4">{t}</Badge>)}
-                          {(o.tags || []).length > 2 && <span className="text-[8px] text-muted-foreground">+{o.tags.length - 2}</span>}
+                          {(o.tags || []).slice(0, viewSize === "large" ? 5 : 2).map((t: string) => <Badge key={t} variant="secondary" className="text-[9px] px-1.5 h-4">{t}</Badge>)}
+                          {(o.tags || []).length > (viewSize === "large" ? 5 : 2) && <span className="text-[8px] text-muted-foreground">+{(o.tags || []).length - (viewSize === "large" ? 5 : 2)}</span>}
                         </div>
-                        <span className="text-[10px] text-muted-foreground flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{o.view_count || 0}</span>
+                        {viewSize !== "small" && <span className="text-[10px] text-muted-foreground flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{o.view_count || 0}</span>}
                       </div>
                     </CardContent>
                   </Card>

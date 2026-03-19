@@ -2,11 +2,11 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getWorkflowStatusMeta } from "@/lib/workflow-status";
 
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status, className }: { status: string; className?: string }) {
   const meta = getWorkflowStatusMeta(status);
 
   return (
-    <Badge variant="outline" className={cn("text-xs font-medium", meta.badgeClass)}>
+    <Badge variant="outline" className={cn("text-xs font-medium", meta.badgeClass, className)}>
       {meta.label}
     </Badge>
   );
@@ -19,9 +19,9 @@ const priorityStyles: Record<string, string> = {
   critical: "bg-destructive/10 text-destructive border-destructive/20",
 };
 
-export function PriorityBadge({ priority }: { priority: string }) {
+export function PriorityBadge({ priority, className }: { priority: string; className?: string }) {
   return (
-    <Badge variant="outline" className={cn("text-xs font-medium", priorityStyles[priority] || "")}>
+    <Badge variant="outline" className={cn("text-xs font-medium", priorityStyles[priority] || "", className)}>
       {priority}
     </Badge>
   );
