@@ -592,6 +592,12 @@ export type Database = {
         }
         Returns: Json
       }
+      update_my_role: {
+        Args: {
+          _target_role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: Json
+      }
     }
     Enums: {
       app_role: "admin" | "reviewer" | "editor" | "viewer"

@@ -117,6 +117,12 @@ BEGIN
       CONTINUE;
     END IF;
 
+    IF raw_description IS NULL AND raw_content IS NULL THEN
+      warnings := warnings || jsonb_build_array(format('Row %s was skipped because description or context is required.', row_number + 1));
+      row_number := row_number + 1;
+      CONTINUE;
+    END IF;
+
     IF jsonb_typeof(row_data -> 'tags') = 'array' THEN
       SELECT coalesce(array_agg(value), '{}')
       INTO parsed_tags

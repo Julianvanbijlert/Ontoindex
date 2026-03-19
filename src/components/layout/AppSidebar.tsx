@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Network, Search, GitPullRequest,
-  Bell, User, Settings, Star, Clock, FolderOpen, LogOut, Users
+  Bell, User, Settings, Star, Clock, LogOut, Users
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -13,10 +13,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RoleBadge } from "@/components/shared/RoleBadge";
 
 const mainItems = [
+  { title: "Search", url: "/search", icon: Search },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Ontologies", url: "/ontologies", icon: Network },
   { title: "Definitions", url: "/definitions", icon: BookOpen },
-  { title: "Search", url: "/search", icon: Search },
   { title: "Workflow", url: "/workflow", icon: GitPullRequest },
   { title: "Notifications", url: "/notifications", icon: Bell },
 ];
@@ -24,7 +24,6 @@ const mainItems = [
 const personalItems = [
   { title: "Favorites", url: "/favorites", icon: Star },
   { title: "Recent", url: "/recent", icon: Clock },
-  { title: "Folders", url: "/folders", icon: FolderOpen },
 ];
 
 const settingsItems = [

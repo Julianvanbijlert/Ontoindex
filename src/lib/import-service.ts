@@ -24,7 +24,7 @@ export interface ParsedImportRow {
   status?: WorkflowStatus;
 }
 
-export const REQUIRED_IMPORT_COLUMNS = ["title"];
+export const REQUIRED_IMPORT_REQUIREMENTS = ["title", "description or context"];
 export const SUPPORTED_IMPORT_COLUMNS = [
   "title",
   "description",
@@ -129,10 +129,15 @@ export async function parseImportFile(file: File) {
   }
 
   const normalizedHeaders = Object.keys(rows[0] || {}).map(normalizeHeader);
-  const missingRequiredColumns = REQUIRED_IMPORT_COLUMNS.filter((column) => !normalizedHeaders.includes(column));
+  const missingRequiredColumns = ["title"].filter((column) => !normalizedHeaders.includes(column));
+  const hasDetailColumn = normalizedHeaders.includes("description") || normalizedHeaders.includes("context") || normalizedHeaders.includes("content");
 
   if (missingRequiredColumns.length > 0) {
     throw new Error(`Missing required columns: ${missingRequiredColumns.join(", ")}.`);
+  }
+
+  if (!hasDetailColumn) {
+    throw new Error("Missing required column: description or context.");
   }
 
   const warnings: string[] = [];
@@ -144,6 +149,11 @@ export async function parseImportFile(file: File) {
 
     if (!mappedRow.title) {
       warnings.push(`Row ${rowNumber} was skipped because title is required.`);
+      return;
+    }
+
+    if (!mappedRow.description && !mappedRow.content) {
+      warnings.push(`Row ${rowNumber} was skipped because description or context is required.`);
       return;
     }
 

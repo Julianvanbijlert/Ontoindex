@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Bell, Check, CheckCheck, MessageSquare, Heart, GitPullRequest, Edit2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { fetchNotifications, markAllNotificationsRead, markNotificationRead, type NotificationItem } from "@/lib/notification-service";
 
 const typeConfig: Record<string, { icon: React.ElementType; color: string }> = {
   comment: { icon: MessageSquare, color: "text-primary" },
@@ -21,26 +22,26 @@ const typeConfig: Record<string, { icon: React.ElementType; color: string }> = {
 export default function Notifications() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchData = async () => {
     if (!user) return;
-    const { data } = await supabase.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-    setNotifications(data || []);
+    const data = await fetchNotifications(supabase, user.id);
+    setNotifications(data);
     setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, [user]);
 
   const markRead = async (id: string) => {
-    await supabase.from("notifications").update({ is_read: true }).eq("id", id);
+    await markNotificationRead(supabase, id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
   };
 
   const markAllRead = async () => {
     if (!user) return;
-    await supabase.from("notifications").update({ is_read: true }).eq("user_id", user.id).eq("is_read", false);
+    await markAllNotificationsRead(supabase, user.id);
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
   };
 

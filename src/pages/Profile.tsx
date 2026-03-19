@@ -10,16 +10,20 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getPrimaryRole, type EditableRole, updateMyRole } from "@/lib/role-service";
 
 export default function Profile() {
-  const { profile, roles, refreshProfile } = useAuth();
+  const { profile, roles, refreshProfile, hasRole } = useAuth();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [roleSaving, setRoleSaving] = useState(false);
   const [form, setForm] = useState({
     display_name: profile?.display_name || "",
     bio: profile?.bio || "",
     team: profile?.team || "",
   });
+  const currentRole = getPrimaryRole(roles);
 
   const handleSave = async () => {
     if (!profile) return;
@@ -36,6 +40,20 @@ export default function Profile() {
       setEditing(false);
     }
     setSaving(false);
+  };
+
+  const handleRoleChange = async (nextRole: EditableRole) => {
+    setRoleSaving(true);
+
+    try {
+      await updateMyRole(supabase, nextRole);
+      await refreshProfile();
+      toast.success("Role updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update role");
+    }
+
+    setRoleSaving(false);
   };
 
   const initials = profile?.display_name?.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) || "U";
@@ -105,6 +123,39 @@ export default function Profile() {
           <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span className="text-foreground">{profile?.email}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Member since</span><span className="text-foreground">{profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : "-"}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Roles</span><span className="text-foreground capitalize">{roles.join(", ") || "none"}</span></div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/50">
+        <CardHeader><CardTitle className="text-base">Role</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Your role</Label>
+            <Select value={currentRole} onValueChange={(value) => handleRoleChange(value as EditableRole)} disabled={roleSaving}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="viewer">Viewer</SelectItem>
+                <SelectItem value="editor">Editor</SelectItem>
+                <SelectItem value="admin" disabled={!hasRole("admin")}>Admin</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Viewer is read-only. Editor can create and edit ontology content. Admin keeps full access, including user management.
+          </p>
+          {!hasRole("admin") && (
+            <p className="text-xs text-muted-foreground">
+              The admin option is only available to existing admins to avoid unsafe self-promotion.
+            </p>
+          )}
+          {roleSaving && (
+            <div className="flex items-center text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Updating role...
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

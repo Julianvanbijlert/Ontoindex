@@ -2,9 +2,10 @@ import { ReactNode } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { useAuth } from "@/contexts/AuthContext";
-import { Bell, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 const breadcrumbMap: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -15,7 +16,6 @@ const breadcrumbMap: Record<string, string> = {
   "/notifications": "Notifications",
   "/favorites": "Favorites",
   "/recent": "Recent",
-  "/folders": "Folders",
   "/profile": "Profile",
   "/settings": "Settings",
 };
@@ -44,21 +44,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </div>
             <div className="flex items-center gap-2">
               <Button
-                variant="ghost"
-                size="icon"
+                variant="outline"
+                size="sm"
                 onClick={() => navigate("/search")}
-                className="text-muted-foreground hover:text-foreground"
+                className="gap-2 text-muted-foreground hover:text-foreground"
               >
                 <Search className="h-4 w-4" />
+                Search Knowledge
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => navigate("/notifications")}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <Bell className="h-4 w-4" />
-              </Button>
+              <NotificationBell />
             </div>
           </header>
           <main className="flex-1 p-6 animate-fade-in">

@@ -11,6 +11,7 @@ interface DefinitionRelationsSectionProps {
   loading: boolean;
   error?: string | null;
   onRefresh: () => void;
+  allowCreate?: boolean;
 }
 
 export function DefinitionRelationsSection({
@@ -19,6 +20,7 @@ export function DefinitionRelationsSection({
   loading,
   error,
   onRefresh,
+  allowCreate = true,
 }: DefinitionRelationsSectionProps) {
   const navigate = useNavigate();
 
@@ -46,6 +48,7 @@ export function DefinitionRelationsSection({
             entityId={entityId}
             relationships={relationships}
             onRefresh={onRefresh}
+            allowCreate={allowCreate}
             onRelationClick={(definitionId) => navigate(`/definitions/${definitionId}`)}
           />
         )}
@@ -53,4 +56,3 @@ export function DefinitionRelationsSection({
     </Card>
   );
 }
-

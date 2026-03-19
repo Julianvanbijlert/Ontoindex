@@ -12,7 +12,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { EntityActivityPanel } from "@/components/shared/EntityActivityPanel";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { ImportDialog } from "@/components/shared/ImportDialog";
 import { ExportDialog } from "@/components/shared/ExportDialog";
@@ -25,17 +24,14 @@ import {
   useNodesState, useEdgesState, type Node, type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { Comment } from "@/components/shared/CommentThread";
-import type { TimelineEvent } from "@/components/shared/ActivityTimeline";
+import { getWorkflowNodeStyle, workflowStatusConfig } from "@/lib/workflow-status";
 
 export default function OntologyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [ontology, setOntology] = useState<any>(null);
   const [definitions, setDefinitions] = useState<any[]>([]);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [relationships, setRelationships] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({ title: "", description: "", tags: "" });
@@ -48,6 +44,7 @@ export default function OntologyDetail() {
   const [exportOpen, setExportOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newDef, setNewDef] = useState({ title: "", description: "", content: "", example: "", priority: "normal" });
+  const canEditContent = hasRole("admin") || hasRole("editor");
 
   const fetchAll = async () => {
     if (!id) return;
@@ -67,12 +64,9 @@ export default function OntologyDetail() {
     const defs = defsRes.data || [];
     setDefinitions(defs);
 
-    // Collect all relationships for activity panel
-    const allRels: any[] = [];
     const graphEdges: Edge[] = [];
     defs.forEach((d: any) => {
       (d.relationships || []).forEach((r: any) => {
-        allRels.push(r);
         graphEdges.push({
           id: r.id, source: r.source_id, target: r.target_id,
           label: r.type.replace("_", " "),
@@ -81,16 +75,15 @@ export default function OntologyDetail() {
         });
       });
     });
-    setRelationships(allRels);
 
     const graphNodes: Node[] = defs.map((d: any, i: number) => ({
       id: d.id,
       position: { x: 150 + (i % 4) * 220, y: 80 + Math.floor(i / 4) * 150 },
       data: { label: d.title },
       style: {
-        background: "hsl(var(--card))", border: "1px solid hsl(var(--border))",
+        ...getWorkflowNodeStyle(d.status || "draft"),
         borderRadius: "8px", padding: "12px 16px", fontSize: "13px",
-        fontWeight: 500, color: "hsl(var(--foreground))",
+        fontWeight: 500,
       },
     }));
     setNodes(graphNodes);
@@ -101,6 +94,7 @@ export default function OntologyDetail() {
   useEffect(() => { fetchAll(); }, [id]);
 
   const handleSaveOntology = async () => {
+    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!ontology || !editData.title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
     const tags = editData.tags.split(",").map(t => t.trim()).filter(Boolean);
@@ -113,6 +107,7 @@ export default function OntologyDetail() {
   };
 
   const handleCreateDef = async () => {
+    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!newDef.title.trim()) { toast.error("Title required"); return; }
     setCreating(true);
     const { data, error } = await supabase.from("definitions").insert({
@@ -134,12 +129,6 @@ export default function OntologyDetail() {
     }
     setCreating(false);
   };
-
-  // Timeline from ontology creation
-  const timelineEvents: TimelineEvent[] = [];
-  if (ontology) {
-    timelineEvents.push({ id: "creation", action: "created", timestamp: ontology.created_at, metadata: { summary: `Ontology "${ontology.title}" created` } });
-  }
 
   if (loading) return (
     <div className="max-w-6xl mx-auto space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-96 w-full" /></div>
@@ -168,7 +157,7 @@ export default function OntologyDetail() {
         actions={
           <div className="flex items-center gap-2">
             <LikeButton entityId={ontology.id} entityType="ontology" isLiked={isFavorited} />
-            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3 w-3 mr-1.5" />Import</Button>
+            {canEditContent && <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3 w-3 mr-1.5" />Import</Button>}
             <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}><Download className="h-3 w-3 mr-1.5" />Export</Button>
             {editing ? (
               <div className="flex gap-2">
@@ -177,9 +166,9 @@ export default function OntologyDetail() {
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 </Button>
               </div>
-            ) : (
+            ) : canEditContent ? (
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Edit2 className="h-3 w-3 mr-1.5" />Edit</Button>
-            )}
+            ) : null}
           </div>
         }
       />
@@ -198,47 +187,47 @@ export default function OntologyDetail() {
         <p className="text-sm text-muted-foreground">{ontology.description}</p>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-3">
-          <Tabs defaultValue="definitions">
-            <div className="flex items-center justify-between mb-4">
-              <TabsList>
-                <TabsTrigger value="definitions">Definitions ({definitions.length})</TabsTrigger>
-                <TabsTrigger value="graph">Graph</TabsTrigger>
-                <TabsTrigger value="details">Details</TabsTrigger>
-              </TabsList>
-              <Dialog open={createDefOpen} onOpenChange={setCreateDefOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm"><Plus className="h-3 w-3 mr-1.5" />Add Definition</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader><DialogTitle>Create Definition</DialogTitle></DialogHeader>
-                  <div className="space-y-4 mt-2">
-                    <div className="space-y-2"><Label>Title *</Label><Input placeholder="Definition title" value={newDef.title} onChange={e => setNewDef(p => ({ ...p, title: e.target.value }))} /></div>
-                    <div className="space-y-2"><Label>Description</Label><Textarea placeholder="Brief description" value={newDef.description} onChange={e => setNewDef(p => ({ ...p, description: e.target.value }))} /></div>
-                    <div className="space-y-2"><Label>Context</Label><Textarea placeholder="Detailed context (markdown)" rows={4} value={newDef.content} onChange={e => setNewDef(p => ({ ...p, content: e.target.value }))} /></div>
-                    <div className="space-y-2"><Label>Example</Label><Textarea placeholder="Usage example" rows={3} value={newDef.example} onChange={e => setNewDef(p => ({ ...p, example: e.target.value }))} /></div>
-                    <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={newDef.priority} onValueChange={v => setNewDef(p => ({ ...p, priority: v }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low">Low</SelectItem>
-                          <SelectItem value="normal">Normal</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                          <SelectItem value="critical">Critical</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button onClick={handleCreateDef} className="w-full" disabled={creating}>
-                      {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Definition
-                    </Button>
+      <Tabs defaultValue="definitions">
+        <div className="mb-4 flex items-center justify-between">
+          <TabsList>
+            <TabsTrigger value="definitions">Definitions ({definitions.length})</TabsTrigger>
+            <TabsTrigger value="graph">Graph</TabsTrigger>
+            <TabsTrigger value="details">Details</TabsTrigger>
+          </TabsList>
+          {canEditContent && (
+            <Dialog open={createDefOpen} onOpenChange={setCreateDefOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm"><Plus className="h-3 w-3 mr-1.5" />Add Definition</Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader><DialogTitle>Create Definition</DialogTitle></DialogHeader>
+                <div className="space-y-4 mt-2">
+                  <div className="space-y-2"><Label>Title *</Label><Input placeholder="Definition title" value={newDef.title} onChange={e => setNewDef(p => ({ ...p, title: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>Description</Label><Textarea placeholder="Brief description" value={newDef.description} onChange={e => setNewDef(p => ({ ...p, description: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>Context</Label><Textarea placeholder="Detailed context (markdown)" rows={4} value={newDef.content} onChange={e => setNewDef(p => ({ ...p, content: e.target.value }))} /></div>
+                  <div className="space-y-2"><Label>Example</Label><Textarea placeholder="Usage example" rows={3} value={newDef.example} onChange={e => setNewDef(p => ({ ...p, example: e.target.value }))} /></div>
+                  <div className="space-y-2">
+                    <Label>Priority</Label>
+                    <Select value={newDef.priority} onValueChange={v => setNewDef(p => ({ ...p, priority: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="critical">Critical</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                </DialogContent>
-              </Dialog>
-            </div>
+                  <Button onClick={handleCreateDef} className="w-full" disabled={creating}>
+                    {creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Definition
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
 
-            <TabsContent value="definitions" className="mt-0 space-y-2">
+        <TabsContent value="definitions" className="mt-0 space-y-2">
               {definitions.map(d => (
                 <Card key={d.id} className="border-border/50 hover:border-border transition-colors cursor-pointer" onClick={() => navigate(`/definitions/${d.id}`)}>
                   <CardContent className="p-4 flex items-center justify-between">
@@ -256,62 +245,51 @@ export default function OntologyDetail() {
                   No definitions yet. Create one to get started.
                 </div>
               )}
-            </TabsContent>
+        </TabsContent>
 
-            <TabsContent value="graph" className="mt-0">
-              <Card className="border-border/50">
-                <CardContent className="p-0">
-                  <div style={{ height: 450 }}>
-                    {nodes.length === 0 ? (
-                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                        <div className="text-center"><Network className="h-8 w-8 mx-auto mb-2 opacity-50" /><p>No definitions to graph</p></div>
-                      </div>
-                    ) : (
-                      <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} fitView style={{ background: "hsl(var(--background))" }}>
-                        <Background color="hsl(var(--border))" gap={20} />
-                        <Controls />
-                        <MiniMap style={{ background: "hsl(var(--card))" }} />
-                      </ReactFlow>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="details" className="mt-0">
-              <Card className="border-border/50">
-                <CardContent className="p-6 space-y-4">
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</h3>
-                    <p className="text-sm text-foreground">{ontology.description || "No description"}</p>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground pt-4 border-t border-border/50">
-                    <span>Created {new Date(ontology.created_at).toLocaleDateString()}</span>
-                    <span>Updated {new Date(ontology.updated_at).toLocaleDateString()}</span>
-                    <span>{ontology.view_count} views</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </div>
-
-        <div className="lg:col-span-2">
+        <TabsContent value="graph" className="mt-0">
           <Card className="border-border/50 sticky top-20">
-            <CardContent className="p-4">
-              <EntityActivityPanel
-                entityId={ontology.id}
-                entityType="ontology"
-                comments={comments}
-                timelineEvents={timelineEvents}
-                relationships={relationships}
-                onRefresh={fetchAll}
-                allowRelationshipCreate={false}
-              />
+            <CardContent className="space-y-4 p-4">
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(workflowStatusConfig).map(([status, meta]) => (
+                  <Badge key={status} variant="outline" className={meta.badgeClass}>
+                    {meta.label}
+                  </Badge>
+                ))}
+              </div>
+              <div style={{ height: 450 }}>
+                {nodes.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                    <div className="text-center"><Network className="h-8 w-8 mx-auto mb-2 opacity-50" /><p>No definitions to graph</p></div>
+                  </div>
+                ) : (
+                  <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} fitView style={{ background: "hsl(var(--background))" }}>
+                    <Background color="hsl(var(--border))" gap={20} />
+                    <Controls />
+                    <MiniMap style={{ background: "hsl(var(--card))" }} />
+                  </ReactFlow>
+                )}
+              </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
+        </TabsContent>
+
+        <TabsContent value="details" className="mt-0">
+          <Card className="border-border/50">
+            <CardContent className="p-6 space-y-4">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</h3>
+                <p className="text-sm text-foreground">{ontology.description || "No description"}</p>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-muted-foreground pt-4 border-t border-border/50">
+                <span>Created {new Date(ontology.created_at).toLocaleDateString()}</span>
+                <span>Updated {new Date(ontology.updated_at).toLocaleDateString()}</span>
+                <span>{ontology.view_count} views</span>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <ImportDialog
         open={importOpen}

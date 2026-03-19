@@ -25,7 +25,7 @@ import { DefinitionHistorySection } from "@/components/definition/DefinitionHist
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [definition, setDefinition] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -41,6 +41,7 @@ export default function DefinitionDetail() {
   const [relationshipsLoading, setRelationshipsLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
+  const canEditContent = hasRole("admin") || hasRole("editor");
 
   const fetchAll = async () => {
     if (!id) return;
@@ -82,6 +83,7 @@ export default function DefinitionDetail() {
   useEffect(() => { fetchAll(); }, [id]);
 
   const handleSave = async () => {
+    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!definition || !editData.title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
     await supabase.from("version_history").insert({
@@ -109,6 +111,7 @@ export default function DefinitionDetail() {
   };
 
   const handleRequestApproval = async () => {
+    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!user || !id) return;
     setRequesting(true);
     const { error } = await supabase.from("approval_requests").insert({
@@ -184,11 +187,11 @@ export default function DefinitionDetail() {
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 </Button>
               </div>
-            ) : (
+            ) : canEditContent ? (
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 <Edit2 className="mr-2 h-3 w-3" />Edit
               </Button>
-            )}
+            ) : null}
           </>
         }
       />
@@ -298,6 +301,7 @@ export default function DefinitionDetail() {
             loading={relationshipsLoading}
             error={relationshipsError}
             onRefresh={fetchAll}
+            allowCreate={canEditContent}
           />
 
           <DefinitionHistorySection

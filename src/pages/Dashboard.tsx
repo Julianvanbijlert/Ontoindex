@@ -3,11 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, Network, GitPullRequest, MessageSquare, Clock, TrendingUp, Heart, Bell } from "lucide-react";
+import { BookOpen, Network, GitPullRequest, MessageSquare, TrendingUp, Bell, Search } from "lucide-react";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { StatCard } from "@/components/shared/StatCard";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 interface Stats {
   definitions: number;
@@ -17,7 +18,7 @@ interface Stats {
 }
 
 export default function Dashboard() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats>({ definitions: 0, ontologies: 0, pendingApprovals: 0, comments: 0 });
   const [recentDefs, setRecentDefs] = useState<any[]>([]);
@@ -28,6 +29,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!user) {
+        return;
+      }
       const [defsRes, ontoRes, appRes, comRes, recentDefRes, recentOntoRes, activityRes, notifsRes] = await Promise.all([
         supabase.from("definitions").select("id", { count: "exact", head: true }),
         supabase.from("ontologies").select("id", { count: "exact", head: true }),
@@ -36,7 +40,7 @@ export default function Dashboard() {
         supabase.from("definitions").select("id, title, status, priority, updated_at, ontologies(title)").order("updated_at", { ascending: false }).limit(5),
         supabase.from("ontologies").select("id, title, status, view_count, updated_at").order("updated_at", { ascending: false }).limit(5),
         supabase.from("activity_events").select("*").order("created_at", { ascending: false }).limit(8),
-        supabase.from("notifications").select("*").eq("is_read", false).order("created_at", { ascending: false }).limit(5),
+        supabase.from("notifications").select("*").eq("user_id", user.id).eq("is_read", false).order("created_at", { ascending: false }).limit(5),
       ]);
 
       setStats({
@@ -52,7 +56,7 @@ export default function Dashboard() {
       setLoading(false);
     };
     fetchData();
-  }, []);
+  }, [user]);
 
   const statCards = [
     { label: "Definitions", value: stats.definitions, icon: BookOpen, color: "text-primary", path: "/definitions" },
@@ -66,6 +70,12 @@ export default function Dashboard() {
       <PageHeader
         title={`Welcome back, ${profile?.display_name || "User"}`}
         description="Here's what's happening in your knowledge base"
+        actions={
+          <Button onClick={() => navigate("/search")} className="gap-2">
+            <Search className="h-4 w-4" />
+            Open Search
+          </Button>
+        }
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

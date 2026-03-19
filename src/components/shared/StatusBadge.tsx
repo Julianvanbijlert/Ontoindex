@@ -1,26 +1,13 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-const statusStyles: Record<string, string> = {
-  draft: "bg-muted text-muted-foreground",
-  in_review: "bg-warning/10 text-warning border-warning/20",
-  approved: "bg-success/10 text-success border-success/20",
-  rejected: "bg-destructive/10 text-destructive border-destructive/20",
-  archived: "bg-muted text-muted-foreground",
-};
-
-const statusLabels: Record<string, string> = {
-  draft: "Draft",
-  in_review: "In Review",
-  approved: "Approved",
-  rejected: "Rejected",
-  archived: "Archived",
-};
+import { getWorkflowStatusMeta } from "@/lib/workflow-status";
 
 export function StatusBadge({ status }: { status: string }) {
+  const meta = getWorkflowStatusMeta(status);
+
   return (
-    <Badge variant="outline" className={cn("text-xs font-medium", statusStyles[status] || "")}>
-      {statusLabels[status] || status}
+    <Badge variant="outline" className={cn("text-xs font-medium", meta.badgeClass)}>
+      {meta.label}
     </Badge>
   );
 }

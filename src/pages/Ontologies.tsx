@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 
 export default function Ontologies() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const navigate = useNavigate();
   const [ontologies, setOntologies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +27,7 @@ export default function Ontologies() {
   const [creating, setCreating] = useState(false);
   const [newOnto, setNewOnto] = useState({ title: "", description: "", tags: "" });
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const canEditContent = hasRole("admin") || hasRole("editor");
 
   const fetchData = async () => {
     setLoading(true);
@@ -44,6 +45,7 @@ export default function Ontologies() {
   useEffect(() => { fetchData(); }, [searchQuery]);
 
   const handleCreate = async () => {
+    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!newOnto.title.trim()) { toast.error("Title required"); return; }
     setCreating(true);
     const tags = newOnto.tags.split(",").map(t => t.trim()).filter(Boolean);
@@ -70,6 +72,7 @@ export default function Ontologies() {
         title="Ontologies"
         description="Browse and manage ontology structures"
         actions={
+          canEditContent ? (
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button><Plus className="mr-2 h-4 w-4" />New Ontology</Button>
@@ -86,6 +89,7 @@ export default function Ontologies() {
               </div>
             </DialogContent>
           </Dialog>
+          ) : undefined
         }
       />
 

@@ -19,7 +19,6 @@ import Workflow from "./pages/Workflow";
 import Notifications from "./pages/Notifications";
 import Favorites from "./pages/Favorites";
 import Recent from "./pages/Recent";
-import Folders from "./pages/Folders";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import AdminUsers from "./pages/AdminUsers";
@@ -37,7 +36,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return null;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to="/search" replace />;
   return <>{children}</>;
 }
 
@@ -49,7 +48,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<Navigate to="/search" replace />} />
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
             <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
@@ -64,7 +63,6 @@ const App = () => (
             <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
             <Route path="/recent" element={<ProtectedRoute><Recent /></ProtectedRoute>} />
-            <Route path="/folders" element={<ProtectedRoute><Folders /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute><AdminUsers /></ProtectedRoute>} />
