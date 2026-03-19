@@ -231,6 +231,22 @@ export function preprocessRow(rawRow: Record<string, unknown>, allHeaders: strin
   if (priorityWarning) warnings.push(priorityWarning);
   if (statusWarning) warnings.push(statusWarning);
 
+  // Heuristic 3: If this looks like a relationship table (semantic data), format it into content
+  if (rawRow.bron_begrip_id || rawRow.doel_begrip_id || rawRow.relatietype) {
+    const table = [
+      "| Semantic Field | Value |",
+      "| :--- | :--- |",
+      `| **Relation ID** | ${rawRow.relatie_id || "N/A"} |`,
+      `| **Source Concept** | ${rawRow.bron_begrip_id || "N/A"} |`,
+      `| **Relationship Type** | ${rawRow.relatietype || "N/A"} |`,
+      `| **Target Concept** | ${rawRow.doel_begrip_id || "N/A"} |`,
+    ].join("\n");
+    content = content ? `${content}\n\n### Semantic Data\n${table}` : `### Semantic Data\n${table}`;
+    if (!title && rawRow.relatietype) {
+      title = `${rawRow.relatietype} (${rawRow.bron_begrip_id} → ${rawRow.doel_begrip_id})`;
+    }
+  }
+
   return {
     title,
     description,
@@ -370,11 +386,22 @@ export async function importDefinitionsToOntology(
 
     // Demo persistence
     const storageKey = `mock_db_definitions_${ontologyId}`;
-    const existing = JSON.parse(localStorage.getItem(storageKey) || "[]");
-    localStorage.setItem(storageKey, JSON.stringify([...existing, ...payload]));
-    window.dispatchEvent(new CustomEvent('app-data-changed', { detail: { type: 'definitions' } }));
+    try {
+      const existing = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      localStorage.setItem(storageKey, JSON.stringify([...existing, ...payload]));
+      
+      // Dispatch event to refresh UI
+      window.dispatchEvent(new CustomEvent('app-data-changed', { detail: { entityType: 'definition', action: 'import' } }));
+    } catch (e) {
+      console.error("Local storage persistence failed", e);
+    }
 
-    await client.from("definitions").insert(payload);
+    // Try DB insert but don't crash if it fails (prototype fallback)
+    try {
+      await client.from("definitions").insert(payload);
+    } catch (dbError) {
+      console.warn("Supabase backup insert failed, relying on local storage", dbError);
+    }
   };
 
   try {

@@ -83,6 +83,27 @@ export default function DefinitionDetail() {
         example: (defRes.data as any).example || "",
       });
       await supabase.from("definitions").update({ view_count: (defRes.data.view_count || 0) + 1 }).eq("id", id);
+    } else {
+      // Fallback for prototype: check local storage if not found in db
+      try {
+        const localGlobal = JSON.parse(localStorage.getItem("mock_db_definitions_global") || "[]");
+        const found = localGlobal.find((d: any) => d.id === id);
+        if (found) {
+          const withOnto = {
+            ...found,
+            ontologies: found.ontologies || { id: "global", title: "Imported" }
+          };
+          setDefinition(withOnto);
+          setEditData({
+            title: withOnto.title,
+            description: withOnto.description || "",
+            content: withOnto.content || "",
+            example: (withOnto as any).example || "",
+          });
+        }
+      } catch (e) {
+        console.warn("Local storage fallback failed", e);
+      }
     }
     setComments(comRes.data || []);
     setVersions(verRes.data || []);
