@@ -4,6 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ImportDialog } from "@/components/shared/ImportDialog";
 
 const importDefinitionsToOntology = vi.fn();
+const authState = { role: "editor" };
+
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => authState,
+}));
 
 vi.mock("@/lib/import-service", () => ({
   importDefinitionsToOntology: (...args: unknown[]) => importDefinitionsToOntology(...args),
@@ -22,6 +27,8 @@ describe("ImportDialog", () => {
       imported: 1,
       errors: [],
       warnings: [],
+      errorCount: 0,
+      warningCount: 0,
     });
     const onImport = vi.fn();
     const file = new File(["title,description\nDefinition,Description"], "definitions.csv", { type: "text/csv" });

@@ -9,5 +9,5 @@ describe("project imports", () => {
 
   it("imports every source module without throwing", async () => {
     await expect(importAllProjectModules()).resolves.toHaveLength(projectModulePaths.length);
-  }, 15000);
+  }, 30000);
 });

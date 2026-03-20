@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { ExportFactory, type OntologyExportSnapshot } from "@/lib/import-export";
+import { ExportFactory, fetchOntologyExportSnapshot, type OntologyExportSnapshot } from "@/lib/import-export";
 import { ImportFactory } from "@/lib/import-factory";
 
 const snapshot: OntologyExportSnapshot = {
@@ -92,6 +92,16 @@ function createImportFile(data: string | Blob, filename: string) {
 }
 
 describe("ExportFactory", () => {
+  it("loads export snapshots through the guarded backend rpc", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: snapshot, error: null });
+    const client = { rpc } as any;
+
+    const result = await fetchOntologyExportSnapshot(client, "onto-1");
+
+    expect(rpc).toHaveBeenCalledWith("export_ontology_snapshot", { _ontology_id: "onto-1" });
+    expect(result).toEqual(snapshot);
+  });
+
   it("returns correctly typed export artifacts for every supported format", async () => {
     for (const exporter of ExportFactory.getAll()) {
       const result = await exporter.export(snapshot);

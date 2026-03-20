@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,15 +16,18 @@ import {
   canCurrentUserReviewAssignment,
   filterAndSortWorkflowRequests,
   formatReviewerLabel,
+  isWorkflowAdmin,
   setReviewAssignmentDecision,
   type ReviewAssignmentRecord,
   type WorkflowRequestRecord,
 } from "@/lib/workflow-service";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 import { Badge } from "@/components/ui/badge";
+import { getDefaultRouteForRole } from "@/lib/app-access";
+import { canAccessWorkflow } from "@/lib/authorization";
 
 export default function Workflow() {
-  const { user, profile, hasRole } = useAuth();
+  const { user, profile, role } = useAuth();
   const navigate = useNavigate();
   const [requests, setRequests] = useState<WorkflowRequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,8 +36,16 @@ export default function Workflow() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"recent" | "oldest" | "title" | "status">("recent");
+  const hasWorkflowAccess = canAccessWorkflow(role);
+  const adminInWorkflow = isWorkflowAdmin(role);
 
   const fetchData = async () => {
+    if (!hasWorkflowAccess) {
+      setRequests([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const { data } = await supabase
       .from("approval_requests")
@@ -84,7 +95,7 @@ export default function Workflow() {
     return subscribeToAppDataChanges(() => {
       fetchData();
     });
-  }, []);
+  }, [hasWorkflowAccess]);
 
   const handleReview = async (assignmentId: string, definitionId: string, decision: "accepted" | "rejected") => {
     if (!user) {
@@ -107,7 +118,7 @@ export default function Workflow() {
 
   const visibleRequests = useMemo(() => {
     const filteredRequests = requests.filter((request) => {
-      if (hasRole("admin")) {
+      if (adminInWorkflow) {
         return true;
       }
 
@@ -116,7 +127,7 @@ export default function Workflow() {
       }
 
       return (request.assignments || []).some((assignment) =>
-        canCurrentUserReviewAssignment(assignment, user?.id, profile?.team, hasRole("admin")),
+        canCurrentUserReviewAssignment(assignment, user?.id, profile?.team, adminInWorkflow),
       );
     });
 
@@ -125,7 +136,11 @@ export default function Workflow() {
       status: statusFilter,
       sortBy,
     });
-  }, [requests, searchQuery, statusFilter, sortBy, user?.id, profile?.team, hasRole]);
+  }, [requests, searchQuery, statusFilter, sortBy, user?.id, profile?.team, adminInWorkflow]);
+
+  if (!hasWorkflowAccess) {
+    return <Navigate to={getDefaultRouteForRole(role)} replace />;
+  }
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -196,7 +211,7 @@ export default function Workflow() {
                 <div className="grid gap-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reviewer Status</p>
                   {(request.assignments || []).map((assignment) => {
-                    const canReview = canCurrentUserReviewAssignment(assignment, user?.id, profile?.team, hasRole("admin"));
+                    const canReview = canCurrentUserReviewAssignment(assignment, user?.id, profile?.team, adminInWorkflow);
 
                     return (
                       <div key={assignment.id} className="rounded-lg border border-border/50 p-3 space-y-3">

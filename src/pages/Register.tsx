@@ -8,8 +8,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Network, Loader2, Eye, Edit2, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import type { AppRole } from "@/lib/authorization";
 
-const roles = [
+const roles: Array<{ value: AppRole; label: string; description: string; icon: typeof Eye }> = [
   { value: "viewer", label: "Viewer", description: "Browse, search, and comment on ontologies and definitions", icon: Eye },
   { value: "editor", label: "Editor", description: "Create and edit definitions, manage ontologies, submit for review", icon: Edit2 },
   { value: "admin", label: "Admin", description: "Full access including user management and role assignment", icon: Shield },
@@ -19,7 +20,7 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [selectedRole, setSelectedRole] = useState("viewer");
+  const [selectedRole, setSelectedRole] = useState<AppRole>("viewer");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -34,7 +35,7 @@ export default function Register() {
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -46,15 +47,8 @@ export default function Register() {
     if (error) {
       toast.error(error.message);
     } else {
-      // Assign role after signup
-      if (data.user) {
-        await supabase.from("user_roles").upsert({
-          user_id: data.user.id,
-          role: selectedRole as any,
-        }, { onConflict: "user_id,role" });
-      }
       toast.success("Account created! Check your email to confirm.");
-      navigate("/dashboard");
+      navigate("/search");
     }
   };
 

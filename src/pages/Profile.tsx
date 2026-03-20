@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,10 +12,13 @@ import { Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { canAccessPath, getDefaultRouteForRole } from "@/lib/app-access";
 import { editableRoles, getPrimaryRole, type EditableRole, updateMyRole } from "@/lib/role-service";
 
 export default function Profile() {
-  const { profile, roles, refreshProfile } = useAuth();
+  const { profile, role, roles, refreshProfile, syncCurrentUserRole } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [roleSaving, setRoleSaving] = useState(false);
@@ -23,7 +27,12 @@ export default function Profile() {
     bio: profile?.bio || "",
     team: profile?.team || "",
   });
-  const currentRole = getPrimaryRole(roles);
+  const currentRole = getPrimaryRole(roles.length > 0 ? roles : [role]);
+  const [selectedRole, setSelectedRole] = useState<EditableRole>(currentRole);
+
+  useEffect(() => {
+    setSelectedRole(currentRole);
+  }, [currentRole]);
 
   const handleSave = async () => {
     if (!profile) return;
@@ -42,15 +51,27 @@ export default function Profile() {
     setSaving(false);
   };
 
-  const handleRoleChange = async (nextRole: EditableRole) => {
+  const handleRoleChange = async () => {
+    if (selectedRole === currentRole) {
+      return;
+    }
+
     setRoleSaving(true);
 
     try {
-      await updateMyRole(supabase, nextRole);
-      await refreshProfile();
-      toast.success("Role updated");
+      const result = await updateMyRole(supabase, selectedRole);
+      const updatedRole = result.role;
+      await syncCurrentUserRole(updatedRole);
+
+      toast.success(result.message);
+
+      if (!canAccessPath(updatedRole, location.pathname)) {
+        navigate(getDefaultRouteForRole(updatedRole), { replace: true });
+      }
     } catch (error) {
+      console.error("Profile role update failed", error);
       toast.error(error instanceof Error ? error.message : "Unable to update role");
+      await refreshProfile();
     }
 
     setRoleSaving(false);
@@ -131,7 +152,11 @@ export default function Profile() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Your role</Label>
-            <Select value={currentRole} onValueChange={(value) => handleRoleChange(value as EditableRole)} disabled={roleSaving}>
+            <Select
+              value={selectedRole}
+              onValueChange={(value) => setSelectedRole(value as EditableRole)}
+              disabled={roleSaving}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -144,6 +169,13 @@ export default function Profile() {
               </SelectContent>
             </Select>
           </div>
+          <Button
+            onClick={handleRoleChange}
+            disabled={roleSaving || selectedRole === currentRole}
+          >
+            {roleSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save role
+          </Button>
           <p className="text-xs text-muted-foreground">
             Viewer is read-only. Editor can create and edit ontology content. Admin keeps full access, including user management.
           </p>

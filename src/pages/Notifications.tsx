@@ -35,7 +35,8 @@ export default function Notifications() {
   }, [user]);
 
   const markRead = async (id: string) => {
-    await markNotificationRead(supabase, id);
+    if (!user) return;
+    await markNotificationRead(supabase, id, user.id);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
     emitAppDataChanged({ entityType: "notification", action: "updated", entityId: id });
   };

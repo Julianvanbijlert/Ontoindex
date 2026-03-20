@@ -47,6 +47,30 @@ export type Database = {
         }
         Relationships: []
       }
+      app_settings: {
+        Row: {
+          allow_self_role_change: boolean
+          created_at: string
+          id: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          allow_self_role_change?: boolean
+          created_at?: string
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          allow_self_role_change?: boolean
+          created_at?: string
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       approval_request_assignments: {
         Row: {
           approval_request_id: string
@@ -625,6 +649,33 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      fetch_my_recent_activity: {
+        Args: {
+          _limit?: number
+        }
+        Returns: {
+          action: string
+          created_at: string
+          details: Json | null
+          entity_id: string | null
+          entity_title: string | null
+          entity_type: string
+          id: string
+          user_id: string | null
+        }[]
+      }
+      delete_comment: {
+        Args: {
+          _comment_id: string
+        }
+        Returns: Json
+      }
+      export_ontology_snapshot: {
+        Args: {
+          _ontology_id: string
+        }
+        Returns: Json
+      }
       delete_definition_cascade: {
         Args: {
           _definition_id: string
@@ -644,6 +695,20 @@ export type Database = {
         }
         Returns: boolean
       }
+      update_my_role: {
+        Args: {
+          _target_role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: Json
+      }
+      admin_update_user_access: {
+        Args: {
+          _target_role: Database["public"]["Enums"]["app_role"]
+          _target_user_id: string
+          _team?: string | null
+        }
+        Returns: Json
+      }
       import_definitions_to_ontology: {
         Args: {
           _ontology_id: string
@@ -655,6 +720,13 @@ export type Database = {
         Args: {
           _filters?: Json
           _query: string
+        }
+        Returns: Json
+      }
+      set_comment_resolved: {
+        Args: {
+          _comment_id: string
+          _resolved?: boolean
         }
         Returns: Json
       }
@@ -672,12 +744,6 @@ export type Database = {
           _message?: string
           _reviewer_teams?: string[]
           _reviewer_user_ids?: string[]
-        }
-        Returns: Json
-      }
-      update_my_role: {
-        Args: {
-          _target_role: Database["public"]["Enums"]["app_role"]
         }
         Returns: Json
       }

@@ -19,6 +19,7 @@ import {
   getRelationshipDisplayLabel,
   predefinedRelationshipTypes,
 } from "@/lib/relationship-service";
+import { canManageRelationships } from "@/lib/authorization";
 
 interface Relationship {
   id: string;
@@ -69,7 +70,7 @@ export function RelationshipPanel({
   allowCreate = true,
   onRelationClick,
 }: RelationshipPanelProps) {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSearch, setTargetSearch] = useState("");
   const [targetResults, setTargetResults] = useState<any[]>([]);
@@ -77,6 +78,7 @@ export function RelationshipPanel({
   const [relType, setRelType] = useState<string>(predefinedRelationshipTypes[0]);
   const [customRelationType, setCustomRelationType] = useState("");
   const [creating, setCreating] = useState(false);
+  const canMutateRelationships = allowCreate && canManageRelationships(role);
 
   useEffect(() => {
     if (!targetSearch.trim()) { setTargetResults([]); return; }
@@ -93,6 +95,11 @@ export function RelationshipPanel({
   }, [targetSearch, entityId]);
 
   const handleCreate = async () => {
+    if (!canMutateRelationships) {
+      toast.error("Your current role is read-only.");
+      return;
+    }
+
     if (!selectedTarget || !user) return;
     if (relType === CUSTOM_RELATION_TYPE && !customRelationType.trim()) {
       toast.error("Enter a custom relationship type.");
@@ -123,6 +130,11 @@ export function RelationshipPanel({
   };
 
   const handleDelete = async (relId: string) => {
+    if (!canMutateRelationships) {
+      toast.error("Your current role is read-only.");
+      return;
+    }
+
     const relationship = relationships.find((item) => item.id === relId);
 
     if (!relationship) {
@@ -150,7 +162,7 @@ export function RelationshipPanel({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{relationships.length} relationship{relationships.length !== 1 ? "s" : ""}</p>
-        {allowCreate && (
+        {canMutateRelationships && (
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button size="sm" variant="outline"><Plus className="h-3 w-3 mr-1.5" />Add Relationship</Button>
@@ -247,13 +259,14 @@ export function RelationshipPanel({
                       </div>
                       <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                     </button>
-                    {allowCreate && (
+                    {canMutateRelationships && (
                       <div className="flex items-center pr-2">
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                           onClick={() => handleDelete(r.id)}
+                          aria-label="Delete relationship"
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>

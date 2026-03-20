@@ -45,11 +45,19 @@ import {
   getRelationshipDisplayLabel,
   predefinedRelationshipTypes,
 } from "@/lib/relationship-service";
+import {
+  canCreateDefinition,
+  canDeleteOntology,
+  canEditGraph,
+  canEditOntology,
+  canExportOntology,
+  canImportOntology,
+} from "@/lib/authorization";
 
 export default function OntologyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, hasRole } = useAuth();
+  const { user, role } = useAuth();
   const [ontology, setOntology] = useState<any>(null);
   const [definitions, setDefinitions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +83,12 @@ export default function OntologyDetail() {
   const [graphRenameDefinitionId, setGraphRenameDefinitionId] = useState<string | null>(null);
   const [graphRenameTitle, setGraphRenameTitle] = useState("");
   const [newDef, setNewDef] = useState({ title: "", description: "", content: "", example: "", priority: "normal" });
-  const canEditContent = hasRole("admin") || hasRole("editor");
+  const canMutateOntology = canEditOntology(role);
+  const canRemoveOntology = canDeleteOntology(role);
+  const canImportDefinitions = canImportOntology(role);
+  const canExportDefinitions = canExportOntology(role);
+  const canMutateGraph = canEditGraph(role);
+  const canAddDefinition = canCreateDefinition(role);
   const viewedOntologyIdRef = useRef<string | null>(null);
 
   const fetchAll = async () => {
@@ -157,7 +170,7 @@ export default function OntologyDetail() {
   }, [ontology?.id, ontology?.title, user?.id]);
 
   const handleSaveOntology = async () => {
-    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
+    if (!canMutateOntology) { toast.error("Your current role is read-only."); return; }
     if (!ontology || !editData.title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
     const tags = editData.tags.split(",").map(t => t.trim()).filter(Boolean);
@@ -187,7 +200,7 @@ export default function OntologyDetail() {
   };
 
   const handleCreateDef = async () => {
-    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
+    if (!canAddDefinition) { toast.error("Your current role is read-only."); return; }
     if (!newDef.title.trim()) { toast.error("Title required"); return; }
     setCreating(true);
     const { data, error } = await supabase.from("definitions").insert({
@@ -232,7 +245,7 @@ export default function OntologyDetail() {
   };
 
   const handleGraphConnect = (connection: Connection) => {
-    if (!canEditContent || !connection.source || !connection.target) {
+    if (!canMutateGraph || !connection.source || !connection.target) {
       return;
     }
 
@@ -284,7 +297,7 @@ export default function OntologyDetail() {
   const openGraphRenameDialog = (definitionId: string) => {
     const selectedDefinition = definitions.find((definition) => definition.id === definitionId);
 
-    if (!selectedDefinition || !canEditContent) {
+    if (!selectedDefinition || !canMutateGraph) {
       return;
     }
 
@@ -361,9 +374,9 @@ export default function OntologyDetail() {
         actions={
           <div className="flex items-center gap-2">
             <LikeButton entityId={ontology.id} entityType="ontology" isLiked={isFavorited} />
-            {canEditContent && <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3 w-3 mr-1.5" />Import</Button>}
-            <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}><Download className="h-3 w-3 mr-1.5" />Export</Button>
-            {canEditContent && (
+            {canImportDefinitions && <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="h-3 w-3 mr-1.5" />Import</Button>}
+            {canExportDefinitions && <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}><Download className="h-3 w-3 mr-1.5" />Export</Button>}
+            {canRemoveOntology && (
               <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
                 <AlertDialogTrigger asChild>
                   <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
@@ -398,7 +411,7 @@ export default function OntologyDetail() {
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 </Button>
               </div>
-            ) : canEditContent ? (
+            ) : canMutateOntology ? (
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Edit2 className="h-3 w-3 mr-1.5" />Edit</Button>
             ) : null}
           </div>
@@ -426,7 +439,7 @@ export default function OntologyDetail() {
             <TabsTrigger value="graph">Graph</TabsTrigger>
             <TabsTrigger value="details">Details</TabsTrigger>
           </TabsList>
-          {canEditContent && (
+          {canAddDefinition && (
             <Dialog open={createDefOpen} onOpenChange={setCreateDefOpen}>
               <DialogTrigger asChild>
                 <Button size="sm"><Plus className="h-3 w-3 mr-1.5" />Add Definition</Button>
@@ -498,9 +511,13 @@ export default function OntologyDetail() {
                   </Badge>
                 ))}
               </div>
-              {canEditContent && (
+              {canMutateGraph ? (
                 <p className="text-xs text-muted-foreground">
                   Double-click a node to rename the real definition, or drag a connection between nodes to create a relationship.
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Graph view is read-only for viewers.
                 </p>
               )}
               <div style={{ height: 450 }}>
@@ -514,8 +531,12 @@ export default function OntologyDetail() {
                     edges={edges}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
-                    onConnect={handleGraphConnect}
-                    onNodeDoubleClick={(_, node) => openGraphRenameDialog(node.id)}
+                    onConnect={canMutateGraph ? handleGraphConnect : undefined}
+                    onNodeDoubleClick={canMutateGraph ? (_, node) => openGraphRenameDialog(node.id) : undefined}
+                    nodesDraggable={canMutateGraph}
+                    nodesConnectable={canMutateGraph}
+                    elementsSelectable={canMutateGraph}
+                    edgesFocusable={canMutateGraph}
                     fitView
                     style={{ background: "hsl(var(--background))" }}
                   >
@@ -567,7 +588,7 @@ export default function OntologyDetail() {
             <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm">
               <p className="font-medium text-foreground">
                 <span>{(definitions.find((definition) => definition.id === pendingConnection?.source)?.title || "Source definition")}</span>
-                {pendingConnection?.source && canEditContent && (
+                {pendingConnection?.source && canMutateGraph && (
                   <Button type="button" variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={() => openGraphRenameDialog(pendingConnection.source!)}>
                     <Edit2 className="h-3 w-3 mr-1" />Rename
                   </Button>
@@ -575,7 +596,7 @@ export default function OntologyDetail() {
               </p>
               <p className="text-muted-foreground">
                 <span>connects to {(definitions.find((definition) => definition.id === pendingConnection?.target)?.title || "Target definition")}</span>
-                {pendingConnection?.target && canEditContent && (
+                {pendingConnection?.target && canMutateGraph && (
                   <Button type="button" variant="ghost" size="sm" className="ml-2 h-6 px-2" onClick={() => openGraphRenameDialog(pendingConnection.target!)}>
                     <Edit2 className="h-3 w-3 mr-1" />Rename
                   </Button>

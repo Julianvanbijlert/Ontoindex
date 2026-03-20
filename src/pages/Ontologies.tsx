@@ -17,9 +17,10 @@ import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
+import { canEditOntology } from "@/lib/authorization";
 
 export default function Ontologies() {
-  const { user, hasRole } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
   const [ontologies, setOntologies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +29,7 @@ export default function Ontologies() {
   const [creating, setCreating] = useState(false);
   const [newOnto, setNewOnto] = useState({ title: "", description: "", tags: "" });
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const canEditContent = hasRole("admin") || hasRole("editor");
+  const canCreateOntology = canEditOntology(role);
 
   const fetchData = async () => {
     setLoading(true);
@@ -46,7 +47,7 @@ export default function Ontologies() {
   useEffect(() => { fetchData(); }, [searchQuery]);
 
   const handleCreate = async () => {
-    if (!canEditContent) { toast.error("Your current role is read-only."); return; }
+    if (!canCreateOntology) { toast.error("Your current role is read-only."); return; }
     if (!newOnto.title.trim()) { toast.error("Title required"); return; }
     setCreating(true);
     const tags = newOnto.tags.split(",").map(t => t.trim()).filter(Boolean);
@@ -80,7 +81,7 @@ export default function Ontologies() {
         title="Ontologies"
         description="Browse and manage ontology structures"
         actions={
-          canEditContent ? (
+          canCreateOntology ? (
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button><Plus className="mr-2 h-4 w-4" />New Ontology</Button>
@@ -111,7 +112,12 @@ export default function Ontologies() {
           {[1,2,3].map(i => <Skeleton key={i} className="h-40 w-full rounded-lg" />)}
         </div>
       ) : ontologies.length === 0 ? (
-        <EmptyState icon={<Network className="w-6 h-6" />} title="No ontologies" description="Create your first ontology to start building knowledge graphs" action={{ label: "Create Ontology", onClick: () => setDialogOpen(true) }} />
+        <EmptyState
+          icon={<Network className="w-6 h-6" />}
+          title="No ontologies"
+          description={canCreateOntology ? "Create your first ontology to start building knowledge graphs" : "No ontologies are available yet."}
+          action={canCreateOntology ? { label: "Create Ontology", onClick: () => setDialogOpen(true) } : undefined}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {ontologies.map(o => (

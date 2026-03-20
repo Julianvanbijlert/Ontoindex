@@ -16,6 +16,7 @@ export interface SearchFilters {
   tag: string;
   status: string;
   type: "all" | "definition" | "ontology";
+  ownership: "all" | "mine";
 }
 
 export type SearchSort = "relevance" | "recent" | "views" | "title";
@@ -131,11 +132,16 @@ export function filterAndSortSearchResults(
   query: string,
   filters: SearchFilters,
   sortBy: SearchSort,
+  currentUserId?: string | null,
 ) {
   const normalizedQuery = normalizeSearchQuery(query);
 
   const definitionResults: SearchResultItem[] = definitions
     .filter((definition) => {
+      if (filters.ownership === "mine" && definition.created_by !== currentUserId) {
+        return false;
+      }
+
       if (filters.status !== "all" && definition.status !== filters.status) {
         return false;
       }
@@ -190,6 +196,10 @@ export function filterAndSortSearchResults(
 
   const ontologyResults: SearchResultItem[] = ontologies
     .filter((ontology) => {
+      if (filters.ownership === "mine" && ontology.created_by !== currentUserId) {
+        return false;
+      }
+
       if (filters.status !== "all" && ontology.status !== filters.status) {
         return false;
       }
@@ -318,15 +328,16 @@ export async function searchEntities(
   query: string,
   filters: SearchFilters,
   sortBy: SearchSort,
+  currentUserId?: string | null,
 ) {
   const [definitionsResponse, ontologiesResponse] = await Promise.all([
     client
       .from("definitions")
-      .select("id, title, description, content, ontology_id, priority, status, tags, updated_at, view_count, ontologies(id, title)")
+      .select("id, title, description, content, ontology_id, priority, status, tags, updated_at, view_count, created_by, ontologies(id, title)")
       .eq("is_deleted", false),
     client
       .from("ontologies")
-      .select("id, title, description, status, tags, updated_at, view_count"),
+      .select("id, title, description, status, tags, updated_at, view_count, created_by"),
   ]);
 
   if (definitionsResponse.error) {
@@ -343,6 +354,7 @@ export async function searchEntities(
     query,
     filters,
     sortBy,
+    currentUserId,
   );
 }
 

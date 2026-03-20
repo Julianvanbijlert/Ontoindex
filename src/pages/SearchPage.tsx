@@ -4,6 +4,7 @@ import { Clock, Network, Search as SearchIcon, X } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { canAccessOwnSearchFilter } from "@/lib/authorization";
 import {
   fetchRecentFinds,
   fetchSearchHistory,
@@ -27,7 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function SearchPage() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -37,6 +38,7 @@ export default function SearchPage() {
   const [ontologyFilter, setOntologyFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "definition" | "ontology">("all");
+  const [ownershipFilter, setOwnershipFilter] = useState<"all" | "mine">("all");
   const [sortBy, setSortBy] = useState<SearchSort>("relevance");
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
   const [recentFinds, setRecentFinds] = useState<SearchResultItem[]>([]);
@@ -45,13 +47,15 @@ export default function SearchPage() {
   const [ontologies, setOntologies] = useState<Array<{ id: string; title: string }>>([]);
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState(false);
+  const canFilterToOwnItems = canAccessOwnSearchFilter(role);
 
   const hasActiveSearch = Boolean(
     query.trim() ||
       statusFilter !== "all" ||
       ontologyFilter !== "all" ||
       tagFilter !== "all" ||
-      typeFilter !== "all",
+      typeFilter !== "all" ||
+      ownershipFilter !== "all",
   );
   const historySuggestions = filterSearchHistory(searchHistory, query).slice(0, 6);
 
@@ -93,8 +97,10 @@ export default function SearchPage() {
           tag: tagFilter,
           status: statusFilter,
           type: typeFilter,
+          ownership: canFilterToOwnItems ? ownershipFilter : "all",
         },
         sortBy,
+        user?.id,
       );
 
       setResults(data);
@@ -102,6 +108,12 @@ export default function SearchPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!canFilterToOwnItems && ownershipFilter !== "all") {
+      setOwnershipFilter("all");
+    }
+  }, [canFilterToOwnItems, ownershipFilter]);
 
   useEffect(() => {
     fetchSearchOptions(supabase).then((options) => {
@@ -123,7 +135,7 @@ export default function SearchPage() {
     }
 
     performSearch();
-  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy, recentFinds]);
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, ownershipFilter, sortBy, recentFinds]);
 
   useEffect(() => {
     return subscribeToAppDataChanges(() => {
@@ -138,7 +150,7 @@ export default function SearchPage() {
         performSearch();
       }
     });
-  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, sortBy, hasActiveSearch, user]);
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, ownershipFilter, sortBy, hasActiveSearch, user]);
 
   const handleSubmitSearch = async (explicitQuery?: string) => {
     const nextQuery = explicitQuery ?? query;
@@ -158,6 +170,7 @@ export default function SearchPage() {
         ontologyId: ontologyFilter,
         tag: tagFilter,
         type: typeFilter,
+        ownership: canFilterToOwnItems ? ownershipFilter : "all",
         sortBy,
       });
       await refreshHistory();
@@ -327,6 +340,18 @@ export default function SearchPage() {
             </SelectContent>
           </Select>
         </div>
+
+        {canFilterToOwnItems && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border"
+              checked={ownershipFilter === "mine"}
+              onChange={(event) => setOwnershipFilter(event.target.checked ? "mine" : "all")}
+            />
+            My own ones
+          </label>
+        )}
       </div>
 
       {loading ? (

@@ -62,7 +62,7 @@ describe("Notifications page", () => {
 
     fireEvent.click(screen.getByText("Access Policy moved from draft to approved."));
 
-    await waitFor(() => expect(markNotificationRead).toHaveBeenCalledWith({}, "notification-1"));
+    await waitFor(() => expect(markNotificationRead).toHaveBeenCalledWith({}, "notification-1", "user-1"));
     expect(navigate).toHaveBeenCalledWith("/definitions/definition-1");
   });
 });

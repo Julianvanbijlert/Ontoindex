@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { canCurrentUserReviewAssignment, deriveAggregateReviewStatus, filterAndSortWorkflowRequests } from "@/lib/workflow-service";
+import {
+  canCurrentUserReviewAssignment,
+  deriveAggregateReviewStatus,
+  fetchReviewerOptions,
+  filterAndSortWorkflowRequests,
+  isWorkflowAdmin,
+} from "@/lib/workflow-service";
 
 describe("workflow-service", () => {
   it("filters workflow requests by query and sorts them by title", () => {
@@ -67,5 +73,52 @@ describe("workflow-service", () => {
         false,
       ),
     ).toBe(true);
+  });
+
+  it("loads only editor and admin reviewer options", async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: [
+        { user_id: "user-1", display_name: "Editor User", email: "editor@example.com", team: "Architecture" },
+        { user_id: "user-2", display_name: "Admin User", email: "admin@example.com", team: "Platform" },
+      ],
+      error: null,
+    });
+    const profileUserFilter = vi.fn().mockReturnValue({ order });
+    const profileSelect = vi.fn().mockReturnValue({ in: profileUserFilter });
+    const roleFilter = vi.fn().mockResolvedValue({
+      data: [
+        { user_id: "user-1", role: "editor" },
+        { user_id: "user-2", role: "admin" },
+      ],
+      error: null,
+    });
+    const roleSelect = vi.fn().mockReturnValue({ in: roleFilter });
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "user_roles") {
+          return { select: roleSelect };
+        }
+
+        if (table === "profiles") {
+          return { select: profileSelect };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    } as any;
+
+    const result = await fetchReviewerOptions(client);
+
+    expect(roleFilter).toHaveBeenCalledWith("role", ["editor", "admin", "reviewer"]);
+    expect(profileSelect).toHaveBeenCalledWith("user_id, display_name, email, team");
+    expect(profileUserFilter).toHaveBeenCalledWith("user_id", ["user-1", "user-2"]);
+    expect(result.users.map((user) => user.displayName)).toEqual(["Editor User", "Admin User"]);
+  });
+
+  it("treats only admins as workflow admins", () => {
+    expect(isWorkflowAdmin("admin")).toBe(true);
+    expect(isWorkflowAdmin("editor")).toBe(false);
+    expect(isWorkflowAdmin("viewer")).toBe(false);
+    expect(isWorkflowAdmin("reviewer")).toBe(false);
   });
 });

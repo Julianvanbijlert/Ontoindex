@@ -53,6 +53,8 @@ describe("favorites-service", () => {
 
     const result = await fetchFavoriteItems(client, "user-1");
 
+    expect(eq).toHaveBeenCalledWith("user_id", "user-1");
+
     expect(result).toEqual([
       {
         favoriteId: "fav-1",

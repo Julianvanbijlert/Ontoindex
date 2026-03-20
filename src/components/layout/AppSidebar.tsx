@@ -12,6 +12,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { RoleBadge } from "@/components/shared/RoleBadge";
 import { useNavigate } from "react-router-dom";
+import { canAccessPath } from "@/lib/app-access";
 
 const mainItems = [
   { title: "Search", url: "/search", icon: Search },
@@ -35,7 +36,7 @@ const settingsItems = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const { profile, roles, signOut, hasRole } = useAuth();
+  const { profile, role, signOut } = useAuth();
   const navigate = useNavigate();
 
   const initials = profile?.display_name
@@ -60,7 +61,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {mainItems.map(item => (
+              {mainItems.filter((item) => canAccessPath(role, item.url)).map(item => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium">
@@ -78,7 +79,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Personal</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {personalItems.map(item => (
+              {personalItems.filter((item) => canAccessPath(role, item.url)).map(item => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium">
@@ -96,7 +97,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Account</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {settingsItems.map(item => (
+              {settingsItems.filter((item) => canAccessPath(role, item.url)).map(item => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium">
@@ -106,7 +107,7 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {hasRole("admin") && (
+              {canAccessPath(role, "/admin/users") && (
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild>
                     <NavLink to="/admin/users" className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium">
@@ -139,7 +140,7 @@ export function AppSidebar() {
                   {profile?.display_name || "User"}
                 </p>
                 <div className="flex gap-1 mt-0.5">
-                  {roles.slice(0, 1).map(r => <RoleBadge key={r} role={r} />)}
+                  <RoleBadge role={role} />
                 </div>
               </div>
             )}

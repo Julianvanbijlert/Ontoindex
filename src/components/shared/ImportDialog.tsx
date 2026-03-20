@@ -13,6 +13,8 @@ import {
 } from "@/lib/import-service";
 import { supabase } from "@/integrations/supabase/client";
 import { ImportFactory } from "@/lib/import-factory";
+import { useAuth } from "@/contexts/AuthContext";
+import { canImportOntology } from "@/lib/authorization";
 
 interface ImportDialogProps {
   open: boolean;
@@ -35,6 +37,7 @@ const iconByFormat: Record<string, React.ElementType> = {
 };
 
 export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, onImport }: ImportDialogProps) {
+  const { role } = useAuth();
   const formats = ImportFactory.getAll();
   const accept = formats.flatMap((format) => format.extensions).join(",");
   const [selectedFormat, setSelectedFormat] = useState(formats[0]?.format || "csv");
@@ -45,6 +48,18 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
   const inputRef = useRef<HTMLInputElement>(null);
 
   const processFile = async (nextFile: File) => {
+    if (!canImportOntology(role)) {
+      setResult({
+        success: false,
+        imported: 0,
+        warnings: [],
+        errors: ["Your current role cannot import ontology data."],
+        warningCount: 0,
+        errorCount: 1,
+      });
+      return;
+    }
+
     setFile(nextFile);
     setProcessing(true);
     setSelectedFormat(ImportFactory.createFromFile(nextFile).format);
@@ -179,7 +194,7 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
             </div>
           )}
 
-          <Button onClick={() => inputRef.current?.click()} className="w-full" disabled={processing}>
+          <Button onClick={() => inputRef.current?.click()} className="w-full" disabled={processing || !canImportOntology(role)}>
             {processing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
             Choose file to import
           </Button>

@@ -76,6 +76,7 @@ describe("search-service", () => {
         tag: "security",
         status: "all",
         type: "all",
+        ownership: "all",
       },
       "views",
     );
@@ -98,6 +99,7 @@ describe("search-service", () => {
           priority: "normal",
           status: "approved",
           tags: ["integration"],
+          created_by: "user-1",
           updated_at: "2026-03-19T09:00:00.000Z",
           view_count: 3,
           ontologies: { id: "onto-1", title: "Platform Ontology" },
@@ -110,6 +112,7 @@ describe("search-service", () => {
           description: "Ontology",
           status: "approved",
           tags: ["integration"],
+          created_by: "user-2",
           updated_at: "2026-03-19T08:00:00.000Z",
           view_count: 50,
         },
@@ -120,6 +123,7 @@ describe("search-service", () => {
         tag: "all",
         status: "all",
         type: "all",
+        ownership: "all",
       },
       "relevance",
     );
@@ -129,5 +133,76 @@ describe("search-service", () => {
       id: "def-1",
     });
   });
-});
 
+  it("limits the editor-only ownership filter to items created by the current user", () => {
+    const result = filterAndSortSearchResults(
+      [
+        {
+          id: "def-1",
+          title: "My Definition",
+          description: "Owned by the current user",
+          content: "",
+          ontology_id: "onto-1",
+          priority: "normal",
+          status: "approved",
+          tags: [],
+          created_by: "user-1",
+          updated_at: "2026-03-19T09:00:00.000Z",
+          view_count: 3,
+          ontologies: { id: "onto-1", title: "Platform Ontology" },
+        },
+        {
+          id: "def-2",
+          title: "Shared Definition",
+          description: "Owned by another user",
+          content: "",
+          ontology_id: "onto-1",
+          priority: "normal",
+          status: "approved",
+          tags: [],
+          created_by: "user-2",
+          updated_at: "2026-03-19T08:00:00.000Z",
+          view_count: 2,
+          ontologies: { id: "onto-1", title: "Platform Ontology" },
+        },
+      ],
+      [
+        {
+          id: "onto-1",
+          title: "My Ontology",
+          description: "Owned ontology",
+          status: "approved",
+          tags: [],
+          created_by: "user-1",
+          updated_at: "2026-03-19T10:00:00.000Z",
+          view_count: 5,
+        },
+        {
+          id: "onto-2",
+          title: "Team Ontology",
+          description: "Owned by another user",
+          status: "approved",
+          tags: [],
+          created_by: "user-3",
+          updated_at: "2026-03-19T07:00:00.000Z",
+          view_count: 1,
+        },
+      ],
+      "",
+      {
+        ontologyId: "all",
+        tag: "all",
+        status: "all",
+        type: "all",
+        ownership: "mine",
+      },
+      "recent",
+      "user-1",
+    );
+
+    expect(result.map((item) => `${item.type}:${item.id}`)).toEqual([
+      "ontology:onto-1",
+      "definition:def-1",
+    ]);
+  });
+});

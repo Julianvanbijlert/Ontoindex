@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Clock, BookOpen, Network, MessageSquare } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { supabase } from "@/integrations/supabase/client";
+import { fetchRecentActivity } from "@/lib/history-service";
+import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function Recent() {
   const { user } = useAuth();
@@ -14,9 +16,24 @@ export default function Recent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-    supabase.from("activity_events").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(30)
-      .then(({ data }) => { setEvents(data || []); setLoading(false); });
+    if (!user) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+
+    const refreshRecentActivity = () => {
+      setLoading(true);
+      fetchRecentActivity(supabase, 30)
+        .then((data) => setEvents(data))
+        .finally(() => setLoading(false));
+    };
+
+    refreshRecentActivity();
+
+    return subscribeToAppDataChanges(() => {
+      refreshRecentActivity();
+    });
   }, [user]);
 
   const iconMap: Record<string, any> = { definition: BookOpen, ontology: Network, comment: MessageSquare };

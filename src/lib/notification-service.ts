@@ -50,8 +50,12 @@ export async function fetchNotifications(client: AppSupabaseClient, userId: stri
   return (data || []) as NotificationItem[];
 }
 
-export async function markNotificationRead(client: AppSupabaseClient, id: string) {
-  const { error } = await client.from("notifications").update({ is_read: true }).eq("id", id);
+export async function markNotificationRead(client: AppSupabaseClient, id: string, userId: string) {
+  const { error } = await client
+    .from("notifications")
+    .update({ is_read: true })
+    .eq("id", id)
+    .eq("user_id", userId);
 
   if (error) {
     throw error;

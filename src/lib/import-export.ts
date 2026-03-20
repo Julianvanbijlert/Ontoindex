@@ -127,53 +127,15 @@ function createStringResult(
 }
 
 export async function fetchOntologyExportSnapshot(client: AppSupabaseClient, ontologyId: string): Promise<OntologyExportSnapshot> {
-  const [ontologyRes, definitionsRes] = await Promise.all([
-    client.from("ontologies").select("*").eq("id", ontologyId).single(),
-    client
-      .from("definitions")
-      .select("id, title, description, content, example, status, priority, tags, updated_at, view_count, relationships!relationships_source_id_fkey(id, type, label, target:target_id(id, title))")
-      .eq("ontology_id", ontologyId)
-      .eq("is_deleted", false)
-      .order("title", { ascending: true }),
-  ]);
+  const { data, error } = await client.rpc("export_ontology_snapshot", {
+    _ontology_id: ontologyId,
+  });
 
-  if (ontologyRes.error) {
-    throw ontologyRes.error;
+  if (error) {
+    throw error;
   }
 
-  if (definitionsRes.error) {
-    throw definitionsRes.error;
-  }
-
-  return {
-    ontology: {
-      id: ontologyRes.data.id,
-      title: ontologyRes.data.title,
-      description: ontologyRes.data.description || "",
-      status: ontologyRes.data.status || "draft",
-      tags: ontologyRes.data.tags || [],
-      updatedAt: ontologyRes.data.updated_at,
-    },
-    definitions: (definitionsRes.data || []).map((definition: any) => ({
-      id: definition.id,
-      title: definition.title,
-      description: definition.description || "",
-      content: definition.content || "",
-      example: definition.example || "",
-      status: definition.status || "draft",
-      priority: definition.priority || "normal",
-      tags: definition.tags || [],
-      updatedAt: definition.updated_at,
-      viewCount: definition.view_count || 0,
-      relationships: (definition.relationships || []).map((relationship: any) => ({
-        id: relationship.id,
-        type: relationship.type,
-        label: relationship.label,
-        targetId: relationship.target?.id || "",
-        targetTitle: relationship.target?.title || "Unknown definition",
-      })),
-    })),
-  };
+  return data as unknown as OntologyExportSnapshot;
 }
 
 class CSVExporter implements Exporter {

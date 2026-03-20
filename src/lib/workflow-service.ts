@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
+import { normalizeRole } from "@/lib/authorization";
+import { fetchPrimaryRolesForUsers } from "@/lib/role-service";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
@@ -94,16 +96,38 @@ export function filterAndSortWorkflowRequests(
 }
 
 export async function fetchReviewerOptions(client: AppSupabaseClient) {
+  const { data: roleRows, error: roleError } = await client
+    .from("user_roles")
+    .select("user_id, role")
+    .in("role", ["editor", "admin", "reviewer"]);
+
+  if (roleError) {
+    throw roleError;
+  }
+
+  const reviewerIds = Array.from(new Set((roleRows || []).map((row) => row.user_id)));
+
+  if (reviewerIds.length === 0) {
+    return {
+      users: [] as ReviewerOption[],
+      teams: [] as string[],
+    };
+  }
+
   const { data, error } = await client
     .from("profiles")
     .select("user_id, display_name, email, team")
+    .in("user_id", reviewerIds)
     .order("display_name", { ascending: true });
 
   if (error) {
     throw error;
   }
 
-  const users: ReviewerOption[] = (data || []).map((profile: any) => ({
+  const rolesByUserId = await fetchPrimaryRolesForUsers(client, reviewerIds);
+  const users: ReviewerOption[] = (data || [])
+    .filter((profile: any) => ["editor", "admin"].includes(rolesByUserId[profile.user_id] || "viewer"))
+    .map((profile: any) => ({
     userId: profile.user_id,
     displayName: profile.display_name,
     email: profile.email,
@@ -182,6 +206,10 @@ export function canCurrentUserReviewAssignment(
   }
 
   return false;
+}
+
+export function isWorkflowAdmin(role: string | null | undefined) {
+  return normalizeRole(role) === "admin";
 }
 
 export function formatReviewerLabel(assignment: ReviewAssignmentRecord) {

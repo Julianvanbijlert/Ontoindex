@@ -16,6 +16,17 @@ export interface HistoryTimelineEvent {
   metadata?: Record<string, unknown>;
 }
 
+export interface RecentActivityItem {
+  id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  entity_title: string | null;
+  user_id: string | null;
+  details: Json | null;
+  created_at: string;
+}
+
 interface LogActivityEventInput {
   userId?: string | null;
   action: ActivityAction;
@@ -140,4 +151,16 @@ export async function fetchEntityTimelineEvents(
       ...(typeof event.details === "object" && event.details ? event.details : {}),
     },
   }));
+}
+
+export async function fetchRecentActivity(client: AppSupabaseClient, limit = 30) {
+  const { data, error } = await client.rpc("fetch_my_recent_activity", {
+    _limit: limit,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []) as RecentActivityItem[];
 }

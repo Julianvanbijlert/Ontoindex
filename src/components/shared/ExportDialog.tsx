@@ -7,6 +7,8 @@ import { ExportFactory, fetchOntologyExportSnapshot } from "@/lib/import-export"
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { canExportOntology } from "@/lib/authorization";
 
 interface ExportDialogProps {
   open: boolean;
@@ -29,11 +31,17 @@ const iconByFormat: Record<string, React.ElementType> = {
 };
 
 export function ExportDialog({ open, onOpenChange, ontologyId, ontologyTitle, entityName = "definitions" }: ExportDialogProps) {
+  const { role } = useAuth();
   const formats = useMemo(() => ExportFactory.getAll(), []);
   const [selectedFormat, setSelectedFormat] = useState(formats[0]?.format || "csv");
   const [exporting, setExporting] = useState(false);
 
   const handleExport = async () => {
+    if (!canExportOntology(role)) {
+      toast.error("Your current role cannot export ontology data");
+      return;
+    }
+
     setExporting(true);
 
     try {
@@ -92,7 +100,7 @@ export function ExportDialog({ open, onOpenChange, ontologyId, ontologyTitle, en
               );
             })}
           </div>
-          <Button onClick={handleExport} className="w-full" disabled={exporting}>
+          <Button onClick={handleExport} className="w-full" disabled={exporting || !canExportOntology(role)}>
             {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
             Export latest snapshot
           </Button>

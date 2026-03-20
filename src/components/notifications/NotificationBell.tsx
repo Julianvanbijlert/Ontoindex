@@ -41,8 +41,8 @@ export function NotificationBell() {
   const unreadCount = notifications.filter((notification) => !notification.is_read).length;
 
   const handleOpenNotification = async (notification: NotificationItem) => {
-    if (!notification.is_read) {
-      await markNotificationRead(supabase, notification.id);
+    if (!notification.is_read && user) {
+      await markNotificationRead(supabase, notification.id, user.id);
       setNotifications((current) =>
         current.map((item) => (item.id === notification.id ? { ...item, is_read: true } : item)),
       );

@@ -43,11 +43,17 @@ import {
   upsertDefinitionReviewRequest,
 } from "@/lib/workflow-service";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  canAccessWorkflow,
+  canDeleteDefinition,
+  canEditDefinition,
+  canManageRelationships,
+} from "@/lib/authorization";
 
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, hasRole } = useAuth();
+  const { user, role } = useAuth();
   const [definition, setDefinition] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -73,7 +79,10 @@ export default function DefinitionDetail() {
   const [relationshipsLoading, setRelationshipsLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [relationshipsError, setRelationshipsError] = useState<string | null>(null);
-  const canEditContent = hasRole("admin") || hasRole("editor");
+  const canEditContent = canEditDefinition(role);
+  const canDeleteCurrentDefinition = canDeleteDefinition(role);
+  const canManageDefinitionRelationships = canManageRelationships(role);
+  const canAccessDefinitionWorkflow = canAccessWorkflow(role);
   const viewedDefinitionIdRef = useRef<string | null>(null);
 
   const fetchAll = async () => {
@@ -89,13 +98,15 @@ export default function DefinitionDetail() {
       supabase.from("comments").select("*").eq("definition_id", id).order("created_at", { ascending: true }),
       supabase.from("relationships").select("id, source_id, target_id, type, label, source:source_id(id, title), target:target_id(id, title)").or(`source_id.eq.${id},target_id.eq.${id}`),
       user ? supabase.from("favorites").select("id").eq("user_id", user.id).eq("definition_id", id).maybeSingle() : Promise.resolve({ data: null }),
-      supabase
-        .from("approval_requests")
-        .select("id, status, message, review_message, requested_by, created_at, updated_at, definition_id")
-        .eq("definition_id", id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      canAccessDefinitionWorkflow
+        ? supabase
+            .from("approval_requests")
+            .select("id, status, message, review_message, requested_by, created_at, updated_at, definition_id")
+            .eq("definition_id", id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
       fetchEntityTimelineEvents(supabase, "definition", id)
         .then((events) => ({ data: events, error: null }))
         .catch((error) => ({
@@ -124,7 +135,7 @@ export default function DefinitionDetail() {
     setHistoryLoading(false);
     setRelationshipsLoading(false);
 
-    if (reviewRes.data?.id) {
+    if (canAccessDefinitionWorkflow && reviewRes.data?.id) {
       const assignmentsRes = await supabase
         .from("approval_request_assignments" as any)
         .select("*")
@@ -172,7 +183,7 @@ export default function DefinitionDetail() {
         fetchAll();
       }
     });
-  }, [id, user]);
+  }, [id, user, canAccessDefinitionWorkflow]);
 
   useEffect(() => {
     if (!canEditContent) {
@@ -281,6 +292,11 @@ export default function DefinitionDetail() {
       return;
     }
 
+    if (!canDeleteCurrentDefinition) {
+      toast.error("Your current role is read-only.");
+      return;
+    }
+
     setDeleting(true);
 
     try {
@@ -339,37 +355,41 @@ export default function DefinitionDetail() {
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 </Button>
               </div>
-            ) : canEditContent ? (
+            ) : (canEditContent || canDeleteCurrentDefinition) ? (
               <div className="flex items-center gap-2">
-                <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
-                      <Trash2 className="mr-2 h-3 w-3" />Delete
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete definition?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This permanently deletes the definition, its relationships, comments, favorites, and linked notifications.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        onClick={handleDeleteDefinition}
-                        disabled={deleting}
-                      >
-                        {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Delete definition
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                  <Edit2 className="mr-2 h-3 w-3" />Edit
-                </Button>
+                {canDeleteCurrentDefinition && (
+                  <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
+                        <Trash2 className="mr-2 h-3 w-3" />Delete
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete definition?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This permanently deletes the definition, its relationships, comments, favorites, and linked notifications.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          onClick={handleDeleteDefinition}
+                          disabled={deleting}
+                        >
+                          {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Delete definition
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+                {canEditContent && (
+                  <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                    <Edit2 className="mr-2 h-3 w-3" />Edit
+                  </Button>
+                )}
               </div>
             ) : null}
           </>
@@ -390,7 +410,7 @@ export default function DefinitionDetail() {
           <Tabs defaultValue="content">
             <TabsList>
               <TabsTrigger value="content">Content</TabsTrigger>
-              <TabsTrigger value="workflow">Workflow</TabsTrigger>
+              {canAccessDefinitionWorkflow && <TabsTrigger value="workflow">Workflow</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="content" className="mt-4">
@@ -452,111 +472,113 @@ export default function DefinitionDetail() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="workflow" className="mt-4">
-              <Card className="border-border/50">
-                <CardHeader><CardTitle className="text-base">Request Approval</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Current status: <StatusBadge status={definition.status} />
-                  </p>
-                  {reviewAssignments.length > 0 && (
-                    <div className="space-y-2 rounded-lg border border-border/50 bg-muted/30 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Assigned Reviewers</p>
-                      {reviewAssignments.map((assignment) => (
-                        <div key={assignment.id} className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">{formatReviewerLabel(assignment)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {assignment.reviewer_team ? "Team review" : assignment.profiles?.email || "User review"}
-                            </p>
+            {canAccessDefinitionWorkflow && (
+              <TabsContent value="workflow" className="mt-4">
+                <Card className="border-border/50">
+                  <CardHeader><CardTitle className="text-base">Request Approval</CardTitle></CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Current status: <StatusBadge status={definition.status} />
+                    </p>
+                    {reviewAssignments.length > 0 && (
+                      <div className="space-y-2 rounded-lg border border-border/50 bg-muted/30 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Assigned Reviewers</p>
+                        {reviewAssignments.map((assignment) => (
+                          <div key={assignment.id} className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">{formatReviewerLabel(assignment)}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {assignment.reviewer_team ? "Team review" : assignment.profiles?.email || "User review"}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <Badge variant="outline" className="capitalize">{assignment.status}</Badge>
+                              {assignment.reviewed_at && (
+                                <p className="mt-1 text-[10px] text-muted-foreground">{new Date(assignment.reviewed_at).toLocaleString()}</p>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <Badge variant="outline" className="capitalize">{assignment.status}</Badge>
-                            {assignment.reviewed_at && (
-                              <p className="mt-1 text-[10px] text-muted-foreground">{new Date(assignment.reviewed_at).toLocaleString()}</p>
+                        ))}
+                      </div>
+                    )}
+                    {definition.status === "draft" || definition.status === "rejected" ? (
+                      <>
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Assign Reviewer User</Label>
+                            <div className="flex gap-2">
+                              <Select value={pendingReviewerUserId} onValueChange={setPendingReviewerUserId}>
+                                <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Select reviewer</SelectItem>
+                                  {reviewerOptions
+                                    .filter((option) => option.userId !== user?.id)
+                                    .map((option) => (
+                                      <SelectItem key={option.userId} value={option.userId}>
+                                        {option.displayName}
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                              <Button type="button" variant="outline" onClick={addReviewerUser}>
+                                <UserPlus className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {selectedReviewerIds.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {selectedReviewerIds.map((reviewerId) => {
+                                  const reviewer = reviewerOptions.find((option) => option.userId === reviewerId);
+                                  return (
+                                    <Badge key={reviewerId} variant="secondary" className="gap-1">
+                                      {reviewer?.displayName || reviewerId}
+                                      <button type="button" onClick={() => setSelectedReviewerIds((current) => current.filter((value) => value !== reviewerId))}>x</button>
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Assign Reviewer Team</Label>
+                            <div className="flex gap-2">
+                              <Select value={pendingReviewerTeam} onValueChange={setPendingReviewerTeam}>
+                                <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Select team</SelectItem>
+                                  {teamOptions.map((team) => (
+                                    <SelectItem key={team} value={team}>{team}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Button type="button" variant="outline" onClick={addReviewerTeam}>
+                                <UserPlus className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {selectedReviewerTeams.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {selectedReviewerTeams.map((team) => (
+                                  <Badge key={team} variant="secondary" className="gap-1">
+                                    {team}
+                                    <button type="button" onClick={() => setSelectedReviewerTeams((current) => current.filter((value) => value !== team))}>x</button>
+                                  </Badge>
+                                ))}
+                              </div>
                             )}
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  {definition.status === "draft" || definition.status === "rejected" ? (
-                    <>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Assign Reviewer User</Label>
-                          <div className="flex gap-2">
-                            <Select value={pendingReviewerUserId} onValueChange={setPendingReviewerUserId}>
-                              <SelectTrigger><SelectValue placeholder="Select user" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Select reviewer</SelectItem>
-                                {reviewerOptions
-                                  .filter((option) => option.userId !== user?.id)
-                                  .map((option) => (
-                                    <SelectItem key={option.userId} value={option.userId}>
-                                      {option.displayName}
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                            <Button type="button" variant="outline" onClick={addReviewerUser}>
-                              <UserPlus className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          {selectedReviewerIds.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {selectedReviewerIds.map((reviewerId) => {
-                                const reviewer = reviewerOptions.find((option) => option.userId === reviewerId);
-                                return (
-                                  <Badge key={reviewerId} variant="secondary" className="gap-1">
-                                    {reviewer?.displayName || reviewerId}
-                                    <button type="button" onClick={() => setSelectedReviewerIds((current) => current.filter((value) => value !== reviewerId))}>x</button>
-                                  </Badge>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Assign Reviewer Team</Label>
-                          <div className="flex gap-2">
-                            <Select value={pendingReviewerTeam} onValueChange={setPendingReviewerTeam}>
-                              <SelectTrigger><SelectValue placeholder="Select team" /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none">Select team</SelectItem>
-                                {teamOptions.map((team) => (
-                                  <SelectItem key={team} value={team}>{team}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Button type="button" variant="outline" onClick={addReviewerTeam}>
-                              <UserPlus className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          {selectedReviewerTeams.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {selectedReviewerTeams.map((team) => (
-                                <Badge key={team} variant="secondary" className="gap-1">
-                                  {team}
-                                  <button type="button" onClick={() => setSelectedReviewerTeams((current) => current.filter((value) => value !== team))}>x</button>
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <Textarea placeholder="Message for reviewers (optional)" value={approvalMsg} onChange={e => setApprovalMsg(e.target.value)} />
-                      <Button onClick={handleRequestApproval} disabled={requesting}>
-                        {requesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Request Approval
-                      </Button>
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">This definition is currently {definition.status.replace("_", " ")}.</p>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
+                        <Textarea placeholder="Message for reviewers (optional)" value={approvalMsg} onChange={e => setApprovalMsg(e.target.value)} />
+                        <Button onClick={handleRequestApproval} disabled={requesting}>
+                          {requesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Request Approval
+                        </Button>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">This definition is currently {definition.status.replace("_", " ")}.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            )}
           </Tabs>
 
           <DefinitionRelationsSection
@@ -565,7 +587,7 @@ export default function DefinitionDetail() {
             loading={relationshipsLoading}
             error={relationshipsError}
             onRefresh={fetchAll}
-            allowCreate={canEditContent}
+            allowCreate={canManageDefinitionRelationships}
           />
 
           <DefinitionHistorySection

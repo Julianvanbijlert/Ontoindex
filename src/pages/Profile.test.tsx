@@ -1,24 +1,57 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Profile from "@/pages/Profile";
 
+const navigate = vi.fn();
 const refreshProfile = vi.fn().mockResolvedValue(undefined);
-const updateMyRole = vi.fn().mockResolvedValue({ role: "admin" });
+const syncCurrentUserRole = vi.fn().mockImplementation(async (nextRole: "viewer" | "editor" | "admin") => {
+  authState.role = nextRole;
+  authState.roles = [nextRole];
+  authState.profile = {
+    ...authState.profile,
+    role: nextRole,
+  };
+});
+const updateMyRole = vi.fn();
+const toastSuccess = vi.fn();
+const toastError = vi.fn();
+
+const authState = {
+  profile: {
+    user_id: "user-1",
+    display_name: "Julia",
+    email: "julia@example.com",
+    bio: "",
+    team: "Architecture",
+    created_at: "2026-03-19T09:00:00.000Z",
+    role: "editor",
+  },
+  role: "editor",
+  roles: ["editor"],
+  refreshProfile,
+  syncCurrentUserRole,
+};
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
 
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({
-    profile: {
-      user_id: "user-1",
-      display_name: "Julia",
-      email: "julia@example.com",
-      bio: "",
-      team: "Architecture",
-      created_at: "2026-03-19T09:00:00.000Z",
-    },
-    roles: ["editor"],
-    refreshProfile,
-  }),
+  useAuth: () => authState,
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: (...args: unknown[]) => toastSuccess(...args),
+    error: (...args: unknown[]) => toastError(...args),
+  },
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
@@ -33,7 +66,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 
 vi.mock("@/lib/role-service", () => ({
   editableRoles: ["viewer", "editor", "admin"],
-  getPrimaryRole: () => "editor",
+  getPrimaryRole: (roles: string[]) => roles[0],
   updateMyRole: (...args: unknown[]) => updateMyRole(...args),
 }));
 
@@ -47,11 +80,12 @@ vi.mock("@/components/ui/select", () => {
         <div>{children}</div>
       </SelectContext.Provider>
     ),
-  SelectTrigger: ({ children }: any) => <button type="button">{children}</button>,
-  SelectValue: () => <span>Selected</span>,
-  SelectContent: ({ children }: any) => <div>{children}</div>,
+    SelectTrigger: ({ children }: any) => <button type="button">{children}</button>,
+    SelectValue: () => <span>Selected</span>,
+    SelectContent: ({ children }: any) => <div>{children}</div>,
     SelectItem: ({ value, children }: any) => {
       const onValueChange = React.useContext(SelectContext);
+
       return (
         <button type="button" onClick={() => onValueChange(value)}>
           {children}
@@ -61,13 +95,122 @@ vi.mock("@/components/ui/select", () => {
   };
 });
 
+function renderProfile(initialPath = "/profile") {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <Profile />
+    </MemoryRouter>,
+  );
+}
+
 describe("Profile", () => {
-  it("lets the current user switch roles and refresh the profile", async () => {
-    render(<Profile />);
+  beforeEach(() => {
+    navigate.mockReset();
+    refreshProfile.mockClear();
+    syncCurrentUserRole.mockClear();
+    toastSuccess.mockClear();
+    toastError.mockClear();
+    updateMyRole.mockReset().mockImplementation(async (_client, nextRole) => ({
+      success: true,
+      userId: "user-1",
+      role: nextRole,
+      message: "Role updated",
+    }));
+    authState.role = "editor";
+    authState.roles = ["editor"];
+    authState.profile = {
+      user_id: "user-1",
+      display_name: "Julia",
+      email: "julia@example.com",
+      bio: "",
+      team: "Architecture",
+      created_at: "2026-03-19T09:00:00.000Z",
+      role: "editor",
+    };
+  });
+
+  it.each([
+    { from: "viewer", to: "editor" },
+    { from: "viewer", to: "admin" },
+    { from: "editor", to: "viewer" },
+    { from: "editor", to: "admin" },
+    { from: "admin", to: "viewer" },
+    { from: "admin", to: "editor" },
+  ])("persists the current user role from $from to $to", async ({ from, to }) => {
+    authState.role = from as any;
+    authState.roles = [from as any];
+    authState.profile = {
+      ...authState.profile,
+      role: from as any,
+    };
+
+    renderProfile();
+
+    fireEvent.click(await screen.findByText(new RegExp(`^${to.charAt(0).toUpperCase()}${to.slice(1)}$`)));
+    fireEvent.click(screen.getByRole("button", { name: /save role/i }));
+
+    await waitFor(() => expect(updateMyRole).toHaveBeenCalledWith(expect.anything(), to));
+    expect(syncCurrentUserRole).toHaveBeenCalledWith(to);
+    expect(authState.role).toBe(to);
+    expect(toastSuccess).toHaveBeenCalledWith("Role updated");
+    expect(toastError).not.toHaveBeenCalled();
+    expect(screen.getAllByText(to).length).toBeGreaterThan(0);
+  });
+
+  it("keeps the user on profile after a successful role change", async () => {
+    renderProfile();
 
     fireEvent.click(await screen.findByText("Admin"));
+    fireEvent.click(screen.getByRole("button", { name: /save role/i }));
 
-    await waitFor(() => expect(updateMyRole).toHaveBeenCalled());
+    await waitFor(() => expect(updateMyRole).toHaveBeenCalledWith(expect.anything(), "admin"));
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows the backend error message when the role update fails", async () => {
+    updateMyRole.mockRejectedValueOnce(
+      new Error("The role update service is not configured in the database."),
+    );
+
+    renderProfile();
+
+    fireEvent.click(await screen.findByText("Admin"));
+    fireEvent.click(screen.getByRole("button", { name: /save role/i }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "The role update service is not configured in the database.",
+      ),
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
     expect(refreshProfile).toHaveBeenCalled();
+  });
+
+  it("shows the role update error when the shared role sync fails", async () => {
+    syncCurrentUserRole.mockRejectedValueOnce(new Error("Session refresh failed"));
+
+    renderProfile();
+
+    fireEvent.click(await screen.findByText("Admin"));
+    fireEvent.click(screen.getByRole("button", { name: /save role/i }));
+
+    await waitFor(() => expect(updateMyRole).toHaveBeenCalledWith(expect.anything(), "admin"));
+    expect(refreshProfile).toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("Session refresh failed");
+  });
+
+  it("does not submit when the selected role has not changed", async () => {
+    renderProfile();
+
+    expect(screen.getByRole("button", { name: /save role/i })).toBeDisabled();
+    expect(updateMyRole).not.toHaveBeenCalled();
+  });
+
+  it("never disables the self-role selector for a signed-in user", async () => {
+    renderProfile();
+
+    fireEvent.click(await screen.findByText("Admin"));
+    expect(screen.getByRole("button", { name: /save role/i })).toBeEnabled();
   });
 });
