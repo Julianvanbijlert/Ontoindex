@@ -4,8 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import Notifications from "@/pages/Notifications";
 
 const fetchNotifications = vi.fn();
+const fetchUnreadNotificationCount = vi.fn();
 const markNotificationRead = vi.fn();
+const markNotificationUnread = vi.fn();
 const markAllNotificationsRead = vi.fn();
+const fetchNotificationPreferences = vi.fn();
+const updateNotificationPreference = vi.fn();
 const navigate = vi.fn();
 
 vi.mock("@/contexts/AuthContext", () => ({
@@ -14,17 +18,20 @@ vi.mock("@/contexts/AuthContext", () => ({
   }),
 }));
 
-vi.mock("@/lib/notification-service", () => ({
-  fetchNotifications: (...args: unknown[]) => fetchNotifications(...args),
-  markNotificationRead: (...args: unknown[]) => markNotificationRead(...args),
-  markAllNotificationsRead: (...args: unknown[]) => markAllNotificationsRead(...args),
-  notificationTypeConfig: {
-    definition_changed: { icon: () => null, label: "Definition changed", color: "text-info" },
-    definition_status_changed: { icon: () => null, label: "Definition status changed", color: "text-warning" },
-    ontology_changed: { icon: () => null, label: "Ontology changed", color: "text-accent" },
-    definition_comment: { icon: () => null, label: "Definition comment", color: "text-primary" },
-  },
-}));
+vi.mock("@/lib/notification-service", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/notification-service")>("@/lib/notification-service");
+
+  return {
+    ...actual,
+    fetchNotifications: (...args: unknown[]) => fetchNotifications(...args),
+    fetchUnreadNotificationCount: (...args: unknown[]) => fetchUnreadNotificationCount(...args),
+    markNotificationRead: (...args: unknown[]) => markNotificationRead(...args),
+    markNotificationUnread: (...args: unknown[]) => markNotificationUnread(...args),
+    markAllNotificationsRead: (...args: unknown[]) => markAllNotificationsRead(...args),
+    fetchNotificationPreferences: (...args: unknown[]) => fetchNotificationPreferences(...args),
+    updateNotificationPreference: (...args: unknown[]) => updateNotificationPreference(...args),
+  };
+});
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {},
@@ -40,29 +47,66 @@ vi.mock("react-router-dom", async () => {
 });
 
 describe("Notifications page", () => {
-  it("shows stored notifications with their type labels and links", async () => {
+  it("shows notifications and marks one as read before navigating", async () => {
     fetchNotifications.mockResolvedValue([
       {
         id: "notification-1",
-        title: "Definition status changed",
-        message: "Access Policy moved from draft to approved.",
-        type: "definition_status_changed",
-        link: "/definitions/definition-1",
+        title: "Definition changed: Access Policy",
+        body: "Workflow status changed from draft to approved.",
+        type: "tracked_definition_history_changed",
+        link_path: "/definitions/definition-1",
         is_read: false,
         created_at: "2026-03-19T15:00:00.000Z",
+        read_at: null,
+        actor_user_id: "user-2",
+        actor_display_name: "Reviewer",
+        actor_email: "reviewer@example.com",
+        entity_type: "definition",
+        entity_id: "definition-1",
+        parent_entity_type: "ontology",
+        parent_entity_id: "ontology-1",
+        metadata: {},
       },
     ]);
+    fetchUnreadNotificationCount.mockResolvedValue(1);
+    fetchNotificationPreferences.mockResolvedValue([]);
     markNotificationRead.mockResolvedValue(undefined);
 
     render(<Notifications />);
 
-    expect(await screen.findByText("Definition status changed", { selector: "p" })).toBeInTheDocument();
-    expect(screen.getByText("Access Policy moved from draft to approved.")).toBeInTheDocument();
-    expect(screen.getByText("Definition status changed", { selector: "div" })).toBeInTheDocument();
+    expect(await screen.findByText("Definition changed: Access Policy")).toBeInTheDocument();
+    expect(screen.getByText("Workflow status changed from draft to approved.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("Access Policy moved from draft to approved."));
+    fireEvent.click(screen.getByText("Workflow status changed from draft to approved."));
 
-    await waitFor(() => expect(markNotificationRead).toHaveBeenCalledWith({}, "notification-1", "user-1"));
+    await waitFor(() => expect(markNotificationRead).toHaveBeenCalledWith({}, "notification-1"));
     expect(navigate).toHaveBeenCalledWith("/definitions/definition-1");
+  });
+
+  it("updates notification preferences from the preferences tab", async () => {
+    fetchNotifications.mockResolvedValue([]);
+    fetchUnreadNotificationCount.mockResolvedValue(0);
+    fetchNotificationPreferences.mockResolvedValue([
+      {
+        notification_type: "comment_reply",
+        category: "comments",
+        label: "Comment replies",
+        description: "Notify me when someone replies to one of my comments.",
+        default_enabled: true,
+        enabled: true,
+      },
+    ]);
+    updateNotificationPreference.mockResolvedValue(undefined);
+
+    render(<Notifications />);
+
+    const preferencesTab = await screen.findByRole("tab", { name: "Preferences" });
+    fireEvent.mouseDown(preferencesTab);
+    fireEvent.click(preferencesTab);
+    fireEvent.click(await screen.findByRole("switch"));
+
+    await waitFor(() =>
+      expect(updateNotificationPreference).toHaveBeenCalledWith({}, "comment_reply", false),
+    );
   });
 });

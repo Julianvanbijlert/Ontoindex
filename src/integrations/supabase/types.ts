@@ -387,33 +387,90 @@ export type Database = {
         }
         Relationships: []
       }
-      notifications: {
+      notification_preferences: {
         Row: {
           created_at: string
+          enabled: boolean
+          id: string
+          notification_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled: boolean
+          id?: string
+          notification_type: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          notification_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          actor_user_id: string | null
+          body: string
+          created_at: string
+          dedupe_key: string | null
+          entity_id: string | null
+          entity_type: string | null
           id: string
           is_read: boolean | null
           link: string | null
+          link_path: string | null
+          metadata: Json | null
           message: string | null
+          parent_entity_id: string | null
+          parent_entity_type: string | null
+          read_at: string | null
           title: string
           type: string
           user_id: string
         }
         Insert: {
+          actor_user_id?: string | null
+          body?: string
           created_at?: string
+          dedupe_key?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
           is_read?: boolean | null
           link?: string | null
+          link_path?: string | null
+          metadata?: Json | null
           message?: string | null
+          parent_entity_id?: string | null
+          parent_entity_type?: string | null
+          read_at?: string | null
           title: string
           type: string
           user_id: string
         }
         Update: {
+          actor_user_id?: string | null
+          body?: string
           created_at?: string
+          dedupe_key?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
           is_read?: boolean | null
           link?: string | null
+          link_path?: string | null
+          metadata?: Json | null
           message?: string | null
+          parent_entity_id?: string | null
+          parent_entity_type?: string | null
+          read_at?: string | null
           title?: string
           type?: string
           user_id?: string
@@ -649,6 +706,70 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      classify_review_assignment_notification_type: {
+        Args: {
+          _definition_id: string
+        }
+        Returns: string
+      }
+      create_notification: {
+        Args: {
+          _actor_user_id?: string | null
+          _allow_self?: boolean
+          _body?: string
+          _dedupe_key?: string | null
+          _entity_id?: string | null
+          _entity_type?: string | null
+          _link_path?: string | null
+          _metadata?: Json
+          _notification_type: string
+          _parent_entity_id?: string | null
+          _parent_entity_type?: string | null
+          _title?: string
+          _user_id: string
+        }
+        Returns: string
+      }
+      fetch_my_notification_preferences: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          category: string
+          default_enabled: boolean
+          description: string
+          enabled: boolean
+          label: string
+          notification_type: string
+        }[]
+      }
+      fetch_my_notification_unread_count: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
+      fetch_my_notifications: {
+        Args: {
+          _limit?: number
+          _offset?: number
+          _unread_only?: boolean
+        }
+        Returns: {
+          actor_display_name: string | null
+          actor_email: string | null
+          actor_user_id: string | null
+          body: string
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          id: string
+          is_read: boolean
+          link_path: string | null
+          metadata: Json | null
+          parent_entity_id: string | null
+          parent_entity_type: string | null
+          read_at: string | null
+          title: string
+          type: string
+        }[]
+      }
       fetch_my_recent_activity: {
         Args: {
           _limit?: number
@@ -716,10 +837,35 @@ export type Database = {
         }
         Returns: Json
       }
+      is_notification_enabled: {
+        Args: {
+          _notification_type: string
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      mark_all_my_notifications_read: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
       save_search_history: {
         Args: {
           _filters?: Json
           _query: string
+        }
+        Returns: Json
+      }
+      set_my_notification_preference: {
+        Args: {
+          _enabled: boolean
+          _notification_type: string
+        }
+        Returns: Json
+      }
+      set_my_notification_read_state: {
+        Args: {
+          _is_read?: boolean
+          _notification_id: string
         }
         Returns: Json
       }

@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { subscribeToAppDataChanges } from "@/lib/entity-events";
+import { fetchNotifications } from "@/lib/notification-service";
 
 interface Stats {
   definitions: number;
@@ -33,7 +34,7 @@ export default function Dashboard() {
       if (!user) {
         return;
       }
-      const [defsRes, ontoRes, appRes, comRes, recentDefRes, recentOntoRes, activityRes, notifsRes] = await Promise.all([
+      const [defsRes, ontoRes, appRes, comRes, recentDefRes, recentOntoRes, activityRes, notifs] = await Promise.all([
         supabase.from("definitions").select("id", { count: "exact", head: true }),
         supabase.from("ontologies").select("id", { count: "exact", head: true }),
         supabase.from("approval_requests").select("id", { count: "exact", head: true }).eq("status", "in_review"),
@@ -41,7 +42,7 @@ export default function Dashboard() {
         supabase.from("definitions").select("id, title, status, priority, updated_at, ontologies(title)").order("updated_at", { ascending: false }).limit(5),
         supabase.from("ontologies").select("id, title, status, view_count, updated_at").order("updated_at", { ascending: false }).limit(5),
         supabase.from("activity_events").select("*").order("created_at", { ascending: false }).limit(8),
-        supabase.from("notifications").select("*").eq("user_id", user.id).eq("is_read", false).order("created_at", { ascending: false }).limit(5),
+        fetchNotifications(supabase, { limit: 5, unreadOnly: true }),
       ]);
 
       setStats({
@@ -53,7 +54,7 @@ export default function Dashboard() {
       setRecentDefs(recentDefRes.data || []);
       setRecentOntos(recentOntoRes.data || []);
       setRecentActivity(activityRes.data || []);
-      setNotifications(notifsRes.data || []);
+      setNotifications(notifs || []);
       setLoading(false);
     };
     fetchData();
@@ -162,7 +163,7 @@ export default function Dashboard() {
                   {notifications.slice(0, 3).map(n => (
                     <div key={n.id} className="p-2.5 rounded-lg bg-primary/5 border border-primary/10">
                       <p className="text-xs font-medium text-foreground">{n.title}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{n.message}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{n.body}</p>
                     </div>
                   ))}
                 </div>
