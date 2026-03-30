@@ -15,6 +15,7 @@ import DefinitionDetail from "./pages/DefinitionDetail";
 import Ontologies from "./pages/Ontologies";
 import OntologyDetail from "./pages/OntologyDetail";
 import SearchPage from "./pages/SearchPage";
+import ChatPage from "./pages/ChatPage";
 import Workflow from "./pages/Workflow";
 import Notifications from "./pages/Notifications";
 import Favorites from "./pages/Favorites";
@@ -45,6 +46,7 @@ const App = () => (
             <Route path="/ontologies" element={<ProtectedRoute><Ontologies /></ProtectedRoute>} />
             <Route path="/ontologies/:id" element={<ProtectedRoute><OntologyDetail /></ProtectedRoute>} />
             <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
             <Route path="/workflow" element={<ProtectedRoute><Workflow /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />

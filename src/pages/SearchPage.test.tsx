@@ -5,6 +5,8 @@ import SearchPage from "@/pages/SearchPage";
 
 const authState = {
   user: { id: "user-1" },
+  session: null,
+  profile: null,
   role: "viewer",
 };
 
@@ -14,7 +16,7 @@ const fetchSearchOptions = vi.fn();
 const fetchSearchHistory = vi.fn();
 const filterSearchHistory = vi.fn();
 const saveSearchHistory = vi.fn();
-const searchEntities = vi.fn();
+const searchEntitiesWithMeta = vi.fn();
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -22,6 +24,7 @@ vi.mock("react-router-dom", async () => {
   return {
     ...actual,
     useNavigate: () => navigate,
+    useLocation: () => ({ pathname: "/search" }),
   };
 });
 
@@ -45,7 +48,7 @@ vi.mock("@/lib/search-service", () => ({
   fetchSearchHistory: (...args: unknown[]) => fetchSearchHistory(...args),
   filterSearchHistory: (...args: unknown[]) => filterSearchHistory(...args),
   saveSearchHistory: (...args: unknown[]) => saveSearchHistory(...args),
-  searchEntities: (...args: unknown[]) => searchEntities(...args),
+  searchEntitiesWithMeta: (...args: unknown[]) => searchEntitiesWithMeta(...args),
 }));
 
 vi.mock("@/components/ui/select", () => {
@@ -76,6 +79,8 @@ vi.mock("@/components/ui/select", () => {
 describe("SearchPage", () => {
   beforeEach(() => {
     authState.user = { id: "user-1" };
+    authState.session = null;
+    authState.profile = null;
     authState.role = "viewer";
     navigate.mockReset();
     fetchRecentFinds.mockReset().mockResolvedValue([]);
@@ -83,7 +88,12 @@ describe("SearchPage", () => {
     fetchSearchHistory.mockReset().mockResolvedValue([]);
     filterSearchHistory.mockReset().mockReturnValue([]);
     saveSearchHistory.mockReset().mockResolvedValue(null);
-    searchEntities.mockReset().mockResolvedValue([]);
+    searchEntitiesWithMeta.mockReset().mockResolvedValue({
+      results: [],
+      diagnostics: {
+        fallbackUsed: false,
+      },
+    });
   });
 
   it("only saves search history when the user explicitly submits a search", async () => {
@@ -93,7 +103,7 @@ describe("SearchPage", () => {
       target: { value: "gateway" },
     });
 
-    await waitFor(() => expect(searchEntities).toHaveBeenCalled());
+    await waitFor(() => expect(searchEntitiesWithMeta).toHaveBeenCalled());
     expect(saveSearchHistory).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
@@ -114,7 +124,7 @@ describe("SearchPage", () => {
     });
 
     await waitFor(() =>
-      expect(searchEntities).toHaveBeenCalledWith(
+      expect(searchEntitiesWithMeta).toHaveBeenCalledWith(
         expect.anything(),
         "gateway",
         expect.objectContaining({
@@ -122,6 +132,7 @@ describe("SearchPage", () => {
         }),
         expect.anything(),
         "user-1",
+        expect.anything(),
       ),
     );
   });
@@ -174,21 +185,26 @@ describe("SearchPage", () => {
         relevance: 0,
       },
     ]);
-    searchEntities.mockResolvedValue([
-      {
-        id: "onto-1",
-        type: "ontology",
-        title: "Gateway Ontology",
-        description: "Search result",
-        status: "approved",
-        updatedAt: "2026-03-19T10:00:00.000Z",
-        viewCount: 7,
-        tags: ["integration"],
-        ontologyId: "onto-1",
-        ontologyTitle: "Gateway Ontology",
-        relevance: 10,
+    searchEntitiesWithMeta.mockResolvedValue({
+      results: [
+        {
+          id: "onto-1",
+          type: "ontology",
+          title: "Gateway Ontology",
+          description: "Search result",
+          status: "approved",
+          updatedAt: "2026-03-19T10:00:00.000Z",
+          viewCount: 7,
+          tags: ["integration"],
+          ontologyId: "onto-1",
+          ontologyTitle: "Gateway Ontology",
+          relevance: 10,
+        },
+      ],
+      diagnostics: {
+        fallbackUsed: false,
       },
-    ]);
+    });
 
     render(<SearchPage />);
 

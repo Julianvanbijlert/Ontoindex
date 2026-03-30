@@ -18,11 +18,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 import { canEditOntology } from "@/lib/authorization";
+import { fetchOntologiesForBrowsePage, type OntologyListItem } from "@/lib/search-entity-list-service";
 
 export default function Ontologies() {
   const { user, role } = useAuth();
   const navigate = useNavigate();
-  const [ontologies, setOntologies] = useState<any[]>([]);
+  const [ontologies, setOntologies] = useState<OntologyListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -33,13 +34,14 @@ export default function Ontologies() {
 
   const fetchData = async () => {
     setLoading(true);
-    let query = supabase.from("ontologies").select("*").order("updated_at", { ascending: false });
-    if (searchQuery.trim()) query = query.ilike("title", `%${searchQuery}%`);
     const [ontoRes, favsRes] = await Promise.all([
-      query,
+      fetchOntologiesForBrowsePage(supabase, {
+        query: searchQuery,
+        currentUserId: user?.id,
+      }),
       user ? supabase.from("favorites").select("ontology_id").eq("user_id", user.id).not("ontology_id", "is", null) : Promise.resolve({ data: [] }),
     ]);
-    setOntologies(ontoRes.data || []);
+    setOntologies(ontoRes);
     setFavorites(new Set((favsRes.data || []).map((f: any) => f.ontology_id)));
     setLoading(false);
   };

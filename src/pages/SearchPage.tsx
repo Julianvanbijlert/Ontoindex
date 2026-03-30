@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Clock, Network, Search as SearchIcon, X } from "lucide-react";
 
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,11 +11,12 @@ import {
   fetchSearchOptions,
   filterSearchHistory,
   saveSearchHistory,
-  searchEntities,
+  searchEntitiesWithMeta,
   type SearchHistoryEntry,
   type SearchResultItem,
   type SearchSort,
 } from "@/lib/search-service";
+import { searchRuntimeConfig } from "@/lib/search-config";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PriorityBadge, StatusBadge } from "@/components/shared/StatusBadge";
@@ -28,12 +29,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { subscribeToAppDataChanges } from "@/lib/entity-events";
 
 export default function SearchPage() {
-  const { user, role } = useAuth();
+  const { user, role, profile, session } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResultItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchNotice, setSearchNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [ontologyFilter, setOntologyFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
@@ -48,6 +52,12 @@ export default function SearchPage() {
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [hasSubmittedSearch, setHasSubmittedSearch] = useState(false);
   const canFilterToOwnItems = canAccessOwnSearchFilter(role);
+  const searchRequestIdRef = useRef(0);
+  const searchDebounceTimeoutRef = useRef<number | null>(null);
+  const activeSearchControllerRef = useRef<AbortController | null>(null);
+  const searchHistoryRef = useRef<SearchHistoryEntry[]>([]);
+  const recentFindsRef = useRef<SearchResultItem[]>([]);
+  const ontologiesRef = useRef<Array<{ id: string; title: string }>>([]);
 
   const hasActiveSearch = Boolean(
     query.trim() ||
@@ -78,18 +88,39 @@ export default function SearchPage() {
     setRecentFinds(recent);
   };
 
-  const performSearch = async (overrideQuery?: string) => {
-    const nextQuery = overrideQuery ?? query;
-
-    if (!nextQuery.trim() && !hasActiveSearch) {
-      setResults([]);
-      return;
+  const clearPendingSearch = () => {
+    if (searchDebounceTimeoutRef.current !== null) {
+      window.clearTimeout(searchDebounceTimeoutRef.current);
+      searchDebounceTimeoutRef.current = null;
     }
 
+    activeSearchControllerRef.current?.abort();
+    activeSearchControllerRef.current = null;
+  };
+
+  const performSearch = async (overrideQuery?: string) => {
+    const nextQuery = overrideQuery ?? query;
+    const latestSearchHistory = searchHistoryRef.current;
+    const latestRecentFinds = recentFindsRef.current;
+    const latestOntologies = ontologiesRef.current;
+
+    if (!nextQuery.trim() && !hasActiveSearch) {
+      clearPendingSearch();
+      setSearchError(null);
+      setSearchNotice(null);
+      setResults([]);
+      return false;
+    }
+
+    clearPendingSearch();
+    setSearchError(null);
     setLoading(true);
+    const requestId = ++searchRequestIdRef.current;
+    const controller = new AbortController();
+    activeSearchControllerRef.current = controller;
 
     try {
-      const data = await searchEntities(
+      const response = await searchEntitiesWithMeta(
         supabase,
         nextQuery,
         {
@@ -101,13 +132,90 @@ export default function SearchPage() {
         },
         sortBy,
         user?.id,
+        {
+          signal: controller.signal,
+          experience: {
+            query: nextQuery,
+            filters: {
+              ontologyId: ontologyFilter,
+              tag: tagFilter,
+              status: statusFilter,
+              type: typeFilter,
+              ownership: canFilterToOwnItems ? ownershipFilter : "all",
+            },
+            route: {
+              pathname: location.pathname,
+              page: "search",
+              ontologyLabel: ontologyFilter !== "all"
+                ? latestOntologies.find((ontology) => ontology.id === ontologyFilter)?.title || null
+                : null,
+            },
+            authenticatedUser: {
+              id: user?.id,
+              role,
+              language: user?.user_metadata?.locale || user?.user_metadata?.language || undefined,
+              preferences: {
+                contextualSearchOptIn: true,
+                viewPreference: profile?.view_preference || null,
+                formatPreference: profile?.format_preference || null,
+                sortPreference: profile?.sort_preference || null,
+                groupByPreference: profile?.group_by_preference || null,
+              },
+            },
+            sessionId: session?.access_token ? `${user?.id || "anon"}:${session.expires_at || "session"}` : null,
+            searchHistory: latestSearchHistory,
+            recentFinds: latestRecentFinds,
+          },
+        },
       );
 
-      setResults(data);
+      if (controller.signal.aborted || requestId !== searchRequestIdRef.current) {
+        return false;
+      }
+
+      setResults(response.results);
+      setSearchNotice(
+        response.diagnostics.fallbackUsed
+          ? "Search is temporarily running in compatibility mode while the hybrid backend recovers."
+          : null,
+      );
+      setSearchError(null);
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return false;
+      }
+
+      if (requestId !== searchRequestIdRef.current) {
+        return false;
+      }
+
+      setResults([]);
+      setSearchNotice(null);
+      setSearchError(error instanceof Error ? error.message : "Search is temporarily unavailable.");
+      return false;
     } finally {
-      setLoading(false);
+      if (requestId === searchRequestIdRef.current) {
+        setLoading(false);
+      }
+
+      if (activeSearchControllerRef.current === controller) {
+        activeSearchControllerRef.current = null;
+      }
     }
   };
+
+  useEffect(() => {
+    searchHistoryRef.current = searchHistory;
+  }, [searchHistory]);
+
+  useEffect(() => {
+    recentFindsRef.current = recentFinds;
+  }, [recentFinds]);
+
+  useEffect(() => {
+    ontologiesRef.current = ontologies;
+  }, [ontologies]);
 
   useEffect(() => {
     if (!canFilterToOwnItems && ownershipFilter !== "all") {
@@ -129,13 +237,37 @@ export default function SearchPage() {
 
   useEffect(() => {
     if (!hasActiveSearch) {
+      clearPendingSearch();
       setHasSubmittedSearch(false);
+      setSearchError(null);
+      setSearchNotice(null);
       setResults(recentFinds);
       return;
     }
 
-    performSearch();
-  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, ownershipFilter, sortBy, recentFinds]);
+    if (searchRuntimeConfig.queryDebounceMs <= 0) {
+      void performSearch();
+      return;
+    }
+
+    searchDebounceTimeoutRef.current = window.setTimeout(() => {
+      searchDebounceTimeoutRef.current = null;
+      void performSearch();
+    }, searchRuntimeConfig.queryDebounceMs);
+
+    return () => {
+      if (searchDebounceTimeoutRef.current !== null) {
+        window.clearTimeout(searchDebounceTimeoutRef.current);
+        searchDebounceTimeoutRef.current = null;
+      }
+    };
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, ownershipFilter, sortBy, role, profile, session, location.pathname]);
+
+  useEffect(() => {
+    if (!hasActiveSearch) {
+      setResults(recentFinds);
+    }
+  }, [hasActiveSearch, recentFinds]);
 
   useEffect(() => {
     return subscribeToAppDataChanges(() => {
@@ -147,10 +279,14 @@ export default function SearchPage() {
       refreshRecentFinds();
 
       if (hasActiveSearch) {
-        performSearch();
+        void performSearch();
       }
     });
-  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, ownershipFilter, sortBy, hasActiveSearch, user]);
+  }, [query, statusFilter, ontologyFilter, tagFilter, typeFilter, ownershipFilter, sortBy, hasActiveSearch, user, role, profile, session, location.pathname]);
+
+  useEffect(() => () => {
+    clearPendingSearch();
+  }, []);
 
   const handleSubmitSearch = async (explicitQuery?: string) => {
     const nextQuery = explicitQuery ?? query;
@@ -162,7 +298,10 @@ export default function SearchPage() {
     setHasSubmittedSearch(true);
     setShowHistory(false);
     setHighlightedHistoryIndex(-1);
-    await performSearch(nextQuery);
+    const searchSucceeded = await performSearch(nextQuery);
+    if (!searchSucceeded) {
+      return;
+    }
 
     if (user) {
       await saveSearchHistory(supabase, nextQuery, {
@@ -356,6 +495,12 @@ export default function SearchPage() {
 
       {loading ? (
         <div className="space-y-3">{[1, 2, 3].map((item) => <Skeleton key={item} className="h-24 w-full rounded-lg" />)}</div>
+      ) : searchError ? (
+        <EmptyState
+          icon={<SearchIcon className="w-6 h-6" />}
+          title="Search unavailable"
+          description={searchError}
+        />
       ) : hasSubmittedSearch && results.length === 0 ? (
         <EmptyState
           icon={<SearchIcon className="w-6 h-6" />}
@@ -364,6 +509,16 @@ export default function SearchPage() {
         />
       ) : (
         <div className="space-y-3">
+          {searchNotice && (
+            <p className="text-sm text-muted-foreground">
+              {searchNotice}
+            </p>
+          )}
+          {hasSubmittedSearch && results[0]?.confidence === "weak" && (
+            <p className="text-sm text-muted-foreground">
+              These results are weak matches. Try a more specific query or add filters to narrow the intent.
+            </p>
+          )}
           {!hasActiveSearch && (
             <div>
               <h2 className="text-sm font-semibold text-foreground">Recent finds</h2>
@@ -390,10 +545,20 @@ export default function SearchPage() {
                   <Badge variant="outline" className="text-[10px]">
                     {result.type === "ontology" ? "Ontology" : "Definition"}
                   </Badge>
+                  {result.confidence && hasActiveSearch && (
+                    <Badge variant="outline" className="text-[10px] capitalize">
+                      {result.confidence}
+                    </Badge>
+                  )}
                   <StatusBadge status={result.status} />
                   {result.type === "definition" && <PriorityBadge priority={result.priority} />}
                 </div>
                 <p className="text-sm text-muted-foreground line-clamp-2">{result.description || "No description"}</p>
+                {hasActiveSearch && result.matchReasons && result.matchReasons.length > 0 && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {result.matchReasons.join(" • ")}
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                   {result.type === "definition" && result.ontologyTitle && (
                     <span className="inline-flex items-center gap-1">

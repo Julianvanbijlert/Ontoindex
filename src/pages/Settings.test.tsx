@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Settings from "@/pages/Settings";
 
+const fetchAdminChatSettings = vi.fn();
+const updateAdminChatSettings = vi.fn();
+
 const authState = {
   profile: {
     user_id: "user-1",
@@ -28,6 +31,11 @@ vi.mock("@/integrations/supabase/client", () => ({
       })),
     })),
   },
+}));
+
+vi.mock("@/lib/chat-admin-settings-service", () => ({
+  fetchAdminChatSettings: (...args: unknown[]) => fetchAdminChatSettings(...args),
+  updateAdminChatSettings: (...args: unknown[]) => updateAdminChatSettings(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -62,6 +70,76 @@ vi.mock("@/components/ui/select", () => ({
 describe("Settings", () => {
   beforeEach(() => {
     authState.role = "viewer";
+    fetchAdminChatSettings.mockReset();
+    updateAdminChatSettings.mockReset();
+    fetchAdminChatSettings.mockResolvedValue({
+      provider: {
+        llmProvider: "gemini",
+        llmModel: "gemini-2.0-flash",
+        llmBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        llmTemperature: 0.2,
+        llmMaxTokens: 700,
+        apiKeyConfigured: false,
+        apiKeyMasked: null,
+        apiKeyUpdatedAt: null,
+      },
+      embeddings: {
+        embeddingProvider: "gemini",
+        embeddingModel: "gemini-embedding-001",
+        embeddingBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        fallbackProvider: "huggingface",
+        fallbackModel: "sentence-transformers/all-MiniLM-L6-v2",
+        fallbackBaseUrl: "https://api-inference.huggingface.co/models",
+        vectorDimensions: 1536,
+      },
+      providerKeys: {
+        deepseek: { configured: false, masked: null, updatedAt: null },
+        gemini: { configured: false, masked: null, updatedAt: null },
+        huggingface: { configured: false, masked: null, updatedAt: null },
+      },
+      runtime: {
+        enableSimilarityExpansion: true,
+        strictCitationsDefault: true,
+        historyLimit: 12,
+        maxEvidenceItems: 6,
+        temperature: 0.2,
+        maxTokens: 700,
+      },
+    });
+    updateAdminChatSettings.mockResolvedValue({
+      provider: {
+        llmProvider: "gemini",
+        llmModel: "gemini-2.0-flash",
+        llmBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        llmTemperature: 0.2,
+        llmMaxTokens: 700,
+        apiKeyConfigured: true,
+        apiKeyMasked: "Configured",
+        apiKeyUpdatedAt: null,
+      },
+      embeddings: {
+        embeddingProvider: "gemini",
+        embeddingModel: "gemini-embedding-001",
+        embeddingBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        fallbackProvider: "huggingface",
+        fallbackModel: "sentence-transformers/all-MiniLM-L6-v2",
+        fallbackBaseUrl: "https://api-inference.huggingface.co/models",
+        vectorDimensions: 1536,
+      },
+      providerKeys: {
+        deepseek: { configured: false, masked: null, updatedAt: null },
+        gemini: { configured: true, masked: "Configured", updatedAt: null },
+        huggingface: { configured: false, masked: null, updatedAt: null },
+      },
+      runtime: {
+        enableSimilarityExpansion: true,
+        strictCitationsDefault: true,
+        historyLimit: 12,
+        maxEvidenceItems: 6,
+        temperature: 0.2,
+        maxTokens: 700,
+      },
+    });
   });
 
   it("shows the appearance settings for non-admin users without any role-policy UI", () => {
@@ -72,13 +150,15 @@ describe("Settings", () => {
     expect(screen.queryByText("Allow users to change their own role")).not.toBeInTheDocument();
   });
 
-  it("also omits role-policy UI for admins", async () => {
+  it("shows admin chat settings for admins", async () => {
     authState.role = "admin";
 
     render(<Settings />);
 
     expect(await screen.findByText("Appearance")).toBeInTheDocument();
-    expect(screen.queryByText("Role Management")).not.toBeInTheDocument();
+    expect(await screen.findByText("Admin AI Settings")).toBeInTheDocument();
+    expect((await screen.findAllByText("Gemini")).length).toBeGreaterThan(0);
+    expect(fetchAdminChatSettings).toHaveBeenCalled();
   });
 
   it("saves appearance settings normally", async () => {
@@ -87,5 +167,25 @@ describe("Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
 
     await waitFor(() => expect(authState.refreshProfile).toHaveBeenCalled());
+  });
+
+  it("lets admins save chat settings without exposing the stored API key", async () => {
+    authState.role = "admin";
+
+    render(<Settings />);
+
+    expect(await screen.findByText("Admin AI Settings")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Set Gemini key"), {
+      target: { value: "secret-key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save ai settings/i }));
+
+    await waitFor(() => expect(updateAdminChatSettings).toHaveBeenCalled());
+    expect(updateAdminChatSettings).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      providerKeys: expect.objectContaining({
+        geminiApiKey: "secret-key",
+      }),
+    }));
   });
 });

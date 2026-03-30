@@ -7,6 +7,7 @@ import {
   MessageSquare,
   MessageSquareReply,
   PencilLine,
+  Trash2,
 } from "lucide-react";
 import { isThisMonth, isThisWeek, isToday } from "date-fns";
 
@@ -20,10 +21,27 @@ type SupabaseErrorLike = {
   message?: string;
 };
 
-export type NotificationCategory = "tracking" | "comments" | "reviews";
+export type NotificationCategory =
+  | "tracking"
+  | "tracked ontology activity"
+  | "tracked definition activity"
+  | "comments"
+  | "reviews";
 export type NotificationType =
   | "tracked_ontology_history_changed"
   | "tracked_definition_history_changed"
+  | "ontology_workflow_changed"
+  | "ontology_edited"
+  | "ontology_relation_added"
+  | "ontology_relation_deleted"
+  | "ontology_deleted"
+  | "ontology_other_activity"
+  | "definition_workflow_changed"
+  | "definition_edited"
+  | "definition_relation_added"
+  | "definition_relation_deleted"
+  | "definition_deleted"
+  | "definition_other_activity"
   | "comment_reply"
   | "comment_resolved"
   | "definition_commented_for_author"
@@ -67,17 +85,87 @@ export interface NotificationGroup {
 
 const notificationPreferenceCatalog = [
   {
-    notification_type: "tracked_ontology_history_changed",
-    category: "tracking",
-    label: "Tracked ontology changes",
-    description: "Notify me when an ontology I have liked or saved gets a new history event.",
+    notification_type: "ontology_workflow_changed",
+    category: "tracked ontology activity",
+    label: "Workflow changes",
+    description: "Notify me when a tracked ontology changes workflow status.",
     default_enabled: true,
   },
   {
-    notification_type: "tracked_definition_history_changed",
-    category: "tracking",
-    label: "Tracked definition changes",
-    description: "Notify me when a definition I have liked or saved gets a new history event.",
+    notification_type: "ontology_edited",
+    category: "tracked ontology activity",
+    label: "Edits",
+    description: "Notify me when a tracked ontology is edited.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "ontology_relation_added",
+    category: "tracked ontology activity",
+    label: "New relations",
+    description: "Notify me when a tracked ontology gets a new relation.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "ontology_relation_deleted",
+    category: "tracked ontology activity",
+    label: "Deleted relations",
+    description: "Notify me when a tracked ontology loses a relation.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "ontology_deleted",
+    category: "tracked ontology activity",
+    label: "Deletions",
+    description: "Notify me when a tracked ontology is deleted.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "ontology_other_activity",
+    category: "tracked ontology activity",
+    label: "Other activity",
+    description: "Notify me about other tracked ontology history events, such as imports or review activity.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "definition_workflow_changed",
+    category: "tracked definition activity",
+    label: "Workflow changes",
+    description: "Notify me when a tracked definition changes workflow status.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "definition_edited",
+    category: "tracked definition activity",
+    label: "Edits",
+    description: "Notify me when a tracked definition is edited.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "definition_relation_added",
+    category: "tracked definition activity",
+    label: "New relations",
+    description: "Notify me when a tracked definition gets a new relation.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "definition_relation_deleted",
+    category: "tracked definition activity",
+    label: "Deleted relations",
+    description: "Notify me when a tracked definition loses a relation.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "definition_deleted",
+    category: "tracked definition activity",
+    label: "Deletions",
+    description: "Notify me when a tracked definition is deleted.",
+    default_enabled: true,
+  },
+  {
+    notification_type: "definition_other_activity",
+    category: "tracked definition activity",
+    label: "Other activity",
+    description: "Notify me about other tracked definition history events, such as review activity.",
     default_enabled: true,
   },
   {
@@ -386,6 +474,78 @@ export const notificationTypeConfig: Record<
     icon: PencilLine,
     label: "Tracked definition change",
     category: "tracking",
+    color: "text-info",
+  },
+  ontology_workflow_changed: {
+    icon: GitPullRequest,
+    label: "Ontology workflow change",
+    category: "tracked ontology activity",
+    color: "text-warning",
+  },
+  ontology_edited: {
+    icon: PencilLine,
+    label: "Ontology edited",
+    category: "tracked ontology activity",
+    color: "text-accent",
+  },
+  ontology_relation_added: {
+    icon: GitBranch,
+    label: "Ontology relation added",
+    category: "tracked ontology activity",
+    color: "text-accent",
+  },
+  ontology_relation_deleted: {
+    icon: GitBranch,
+    label: "Ontology relation removed",
+    category: "tracked ontology activity",
+    color: "text-destructive",
+  },
+  ontology_deleted: {
+    icon: Trash2,
+    label: "Ontology deleted",
+    category: "tracked ontology activity",
+    color: "text-destructive",
+  },
+  ontology_other_activity: {
+    icon: Bell,
+    label: "Ontology activity",
+    category: "tracked ontology activity",
+    color: "text-accent",
+  },
+  definition_workflow_changed: {
+    icon: GitPullRequest,
+    label: "Definition workflow change",
+    category: "tracked definition activity",
+    color: "text-warning",
+  },
+  definition_edited: {
+    icon: PencilLine,
+    label: "Definition edited",
+    category: "tracked definition activity",
+    color: "text-info",
+  },
+  definition_relation_added: {
+    icon: GitBranch,
+    label: "Definition relation added",
+    category: "tracked definition activity",
+    color: "text-info",
+  },
+  definition_relation_deleted: {
+    icon: GitBranch,
+    label: "Definition relation removed",
+    category: "tracked definition activity",
+    color: "text-destructive",
+  },
+  definition_deleted: {
+    icon: Trash2,
+    label: "Definition deleted",
+    category: "tracked definition activity",
+    color: "text-destructive",
+  },
+  definition_other_activity: {
+    icon: Bell,
+    label: "Definition activity",
+    category: "tracked definition activity",
     color: "text-info",
   },
   comment_reply: {

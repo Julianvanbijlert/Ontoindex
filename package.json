@@ -10,7 +10,14 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:search": "vitest run src/lib/search-evaluation.test.ts src/lib/search-diagnostics-logger.test.ts src/lib/search-index-service.test.ts src/lib/search-query.test.ts src/lib/search-service.rpc.test.ts src/lib/search-service.test.ts src/lib/search-context-rollout.test.ts src/lib/search/context/context-collector.test.ts src/pages/SearchPage.test.tsx",
+    "test:chat": "vitest run src/lib/chat/citation-validator.test.ts src/lib/chat/provider-factory.test.ts src/lib/chat/providers/openai-compatible-provider.test.ts src/lib/chat/synonym-expansion.test.ts src/lib/chat/evidence-pack-builder.test.ts src/pages/ChatPage.test.tsx",
+    "test:chat-runtime": "vitest run src/lib/chat/chat-api.test.ts src/lib/chat/chat-service.test.ts src/lib/chat-admin-settings-service.test.ts src/pages/Settings.test.tsx src/pages/ChatPage.test.tsx",
+    "test:settings-page": "vitest run src/pages/Settings.test.tsx",
+    "test:chat-services": "vitest run src/lib/chat/chat-api.test.ts src/lib/chat/chat-service.test.ts src/lib/chat-admin-settings-service.test.ts",
+    "test:chat-page": "vitest run src/pages/ChatPage.test.tsx",
+    "test:chat-retrieval": "vitest run src/lib/chat/citation-validator.test.ts src/lib/chat/provider-factory.test.ts src/lib/chat/providers/openai-compatible-provider.test.ts src/lib/chat/synonym-expansion.test.ts src/lib/chat/evidence-pack-builder.test.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

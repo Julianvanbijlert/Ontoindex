@@ -13,11 +13,12 @@ import { BookOpen, Search, Eye, Network } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { subscribeToAppDataChanges } from "@/lib/entity-events";
+import { fetchDefinitionsForBrowsePage, type DefinitionListItem } from "@/lib/search-entity-list-service";
 
 export default function Definitions() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [definitions, setDefinitions] = useState<any[]>([]);
+  const [definitions, setDefinitions] = useState<DefinitionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -27,22 +28,18 @@ export default function Definitions() {
 
   const fetchData = async () => {
     setLoading(true);
-    let query = supabase
-      .from("definitions")
-      .select("*, ontologies(id, title), relationships!relationships_source_id_fkey(id, type, label, target:target_id(id, title))")
-      .eq("is_deleted", false)
-      .order("updated_at", { ascending: false });
-    if (statusFilter !== "all") query = query.eq("status", statusFilter as any);
-    if (ontologyFilter !== "all") query = query.eq("ontology_id", ontologyFilter);
-    if (searchQuery.trim()) query = query.or(`title.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%`);
-
     const [defsRes, ontoRes, favsRes] = await Promise.all([
-      query,
+      fetchDefinitionsForBrowsePage(supabase, {
+        query: searchQuery,
+        statusFilter,
+        ontologyFilter,
+        currentUserId: user?.id,
+      }),
       supabase.from("ontologies").select("id, title").order("title"),
       user ? supabase.from("favorites").select("definition_id").eq("user_id", user.id).not("definition_id", "is", null) : Promise.resolve({ data: [] }),
     ]);
 
-    setDefinitions(defsRes.data || []);
+    setDefinitions(defsRes);
     setOntologies(ontoRes.data || []);
     setFavorites(new Set((favsRes.data || []).map((f: any) => f.definition_id)));
     setLoading(false);

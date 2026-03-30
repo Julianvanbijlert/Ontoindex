@@ -22,7 +22,10 @@ export type Database = {
           entity_id: string | null
           entity_title: string | null
           entity_type: string
+          event_type: string
           id: string
+          is_tombstone: boolean
+          session_id: string | null
           user_id: string | null
         }
         Insert: {
@@ -32,7 +35,10 @@ export type Database = {
           entity_id?: string | null
           entity_title?: string | null
           entity_type: string
+          event_type?: string
           id?: string
+          is_tombstone?: boolean
+          session_id?: string | null
           user_id?: string | null
         }
         Update: {
@@ -42,29 +48,127 @@ export type Database = {
           entity_id?: string | null
           entity_title?: string | null
           entity_type?: string
+          event_type?: string
           id?: string
+          is_tombstone?: boolean
+          session_id?: string | null
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "activity_events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "search_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       app_settings: {
         Row: {
           allow_self_role_change: boolean
+          chat_history_limit: number
+          chat_llm_base_url: string | null
+          chat_llm_max_tokens: number
+          chat_llm_model: string
+          chat_llm_provider: string
+          chat_llm_temperature: number
+          chat_max_evidence_items: number
+          chat_runtime_max_tokens: number
+          chat_runtime_temperature: number
+          chat_similarity_expansion_enabled: boolean
+          chat_strict_citations_default: boolean
           created_at: string
+          embedding_base_url: string | null
+          embedding_fallback_base_url: string | null
+          embedding_fallback_model: string | null
+          embedding_fallback_provider: string
+          embedding_model: string
+          embedding_provider: string
+          embedding_vector_dimensions: number
           id: number
           updated_at: string
           updated_by: string | null
         }
         Insert: {
           allow_self_role_change?: boolean
+          chat_history_limit?: number
+          chat_llm_base_url?: string | null
+          chat_llm_max_tokens?: number
+          chat_llm_model?: string
+          chat_llm_provider?: string
+          chat_llm_temperature?: number
+          chat_max_evidence_items?: number
+          chat_runtime_max_tokens?: number
+          chat_runtime_temperature?: number
+          chat_similarity_expansion_enabled?: boolean
+          chat_strict_citations_default?: boolean
           created_at?: string
+          embedding_base_url?: string | null
+          embedding_fallback_base_url?: string | null
+          embedding_fallback_model?: string | null
+          embedding_fallback_provider?: string
+          embedding_model?: string
+          embedding_provider?: string
+          embedding_vector_dimensions?: number
           id?: number
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
           allow_self_role_change?: boolean
+          chat_history_limit?: number
+          chat_llm_base_url?: string | null
+          chat_llm_max_tokens?: number
+          chat_llm_model?: string
+          chat_llm_provider?: string
+          chat_llm_temperature?: number
+          chat_max_evidence_items?: number
+          chat_runtime_max_tokens?: number
+          chat_runtime_temperature?: number
+          chat_similarity_expansion_enabled?: boolean
+          chat_strict_citations_default?: boolean
           created_at?: string
+          embedding_base_url?: string | null
+          embedding_fallback_base_url?: string | null
+          embedding_fallback_model?: string | null
+          embedding_fallback_provider?: string
+          embedding_model?: string
+          embedding_provider?: string
+          embedding_vector_dimensions?: number
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
+      app_setting_secrets: {
+        Row: {
+          chat_llm_api_key: string | null
+          created_at: string
+          deepseek_api_key: string | null
+          gemini_api_key: string | null
+          hf_api_key: string | null
+          id: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          chat_llm_api_key?: string | null
+          created_at?: string
+          deepseek_api_key?: string | null
+          gemini_api_key?: string | null
+          hf_api_key?: string | null
+          id?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          chat_llm_api_key?: string | null
+          created_at?: string
+          deepseek_api_key?: string | null
+          gemini_api_key?: string | null
+          hf_api_key?: string | null
           id?: number
           updated_at?: string
           updated_by?: string | null
@@ -203,6 +307,194 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      chat_context_summaries: {
+        Row: {
+          metadata: Json
+          rolling_summary: string
+          session_id: string
+          updated_at: string
+        }
+        Insert: {
+          metadata?: Json
+          rolling_summary?: string
+          session_id: string
+          updated_at?: string
+        }
+        Update: {
+          metadata?: Json
+          rolling_summary?: string
+          session_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_context_summaries_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: true
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_logs: {
+        Row: {
+          assistant_message_id: string | null
+          citation_count: number
+          created_at: string
+          evidence_references: Json
+          expansions_used: Json
+          fallback_used: boolean
+          grounding_status: string
+          id: string
+          invalid_citation_count: number
+          metadata: Json
+          model_name: string | null
+          provider_name: string | null
+          refusal: boolean
+          retrieval_plan: Json
+          session_id: string
+          stage_latencies: Json
+          token_usage: Json
+          user_id: string | null
+          user_message_id: string | null
+          user_message_text: string
+        }
+        Insert: {
+          assistant_message_id?: string | null
+          citation_count?: number
+          created_at?: string
+          evidence_references?: Json
+          expansions_used?: Json
+          fallback_used?: boolean
+          grounding_status?: string
+          id?: string
+          invalid_citation_count?: number
+          metadata?: Json
+          model_name?: string | null
+          provider_name?: string | null
+          refusal?: boolean
+          retrieval_plan?: Json
+          session_id: string
+          stage_latencies?: Json
+          token_usage?: Json
+          user_id?: string | null
+          user_message_id?: string | null
+          user_message_text?: string
+        }
+        Update: {
+          assistant_message_id?: string | null
+          citation_count?: number
+          created_at?: string
+          evidence_references?: Json
+          expansions_used?: Json
+          fallback_used?: boolean
+          grounding_status?: string
+          id?: string
+          invalid_citation_count?: number
+          metadata?: Json
+          model_name?: string | null
+          provider_name?: string | null
+          refusal?: boolean
+          retrieval_plan?: Json
+          session_id?: string
+          stage_latencies?: Json
+          token_usage?: Json
+          user_id?: string | null
+          user_message_id?: string | null
+          user_message_text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_logs_assistant_message_id_fkey"
+            columns: ["assistant_message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_logs_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_logs_user_message_id_fkey"
+            columns: ["user_message_id"]
+            isOneToOne: false
+            referencedRelation: "chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          metadata: Json
+          retrieval_reference: Json | null
+          role: string
+          session_id: string
+          tool_call: Json | null
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          retrieval_reference?: Json | null
+          role: string
+          session_id: string
+          tool_call?: Json | null
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          metadata?: Json
+          retrieval_reference?: Json | null
+          role?: string
+          session_id?: string
+          tool_call?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "chat_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_sessions: {
+        Row: {
+          created_at: string
+          id: string
+          last_active_at: string
+          settings: Json
+          title: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_active_at?: string
+          settings?: Json
+          title?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_active_at?: string
+          settings?: Json
+          title?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
       }
       comments: {
         Row: {
@@ -636,6 +928,205 @@ export type Database = {
         }
         Relationships: []
       }
+      search_query_embeddings: {
+        Row: {
+          cache_key: string
+          context_hash: string
+          context_mode: string
+          context_summary: string | null
+          created_at: string
+          debug_metadata: Json
+          embedding: string | null
+          expires_at: string
+          hit_count: number
+          model: string | null
+          query_text: string
+          session_id: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          cache_key: string
+          context_hash?: string
+          context_mode?: string
+          context_summary?: string | null
+          created_at?: string
+          debug_metadata?: Json
+          embedding?: string | null
+          expires_at?: string
+          hit_count?: number
+          model?: string | null
+          query_text: string
+          session_id?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          cache_key?: string
+          context_hash?: string
+          context_mode?: string
+          context_summary?: string | null
+          created_at?: string
+          debug_metadata?: Json
+          embedding?: string | null
+          expires_at?: string
+          hit_count?: number
+          model?: string | null
+          query_text?: string
+          session_id?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_query_embeddings_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "search_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      search_index_jobs: {
+        Row: {
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          id: string
+          job_type: string
+          last_error: string | null
+          locked_by: string | null
+          metadata: Json
+          requested_by: string | null
+          started_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          job_type: string
+          last_error?: string | null
+          locked_by?: string | null
+          metadata?: Json
+          requested_by?: string | null
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          job_type?: string
+          last_error?: string | null
+          locked_by?: string | null
+          metadata?: Json
+          requested_by?: string | null
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      search_session_events: {
+        Row: {
+          created_at: string
+          entity_id: string | null
+          entity_type: string | null
+          event_type: string
+          id: string
+          metadata: Json
+          query_text: string | null
+          session_id: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json
+          query_text?: string | null
+          session_id: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json
+          query_text?: string | null
+          session_id?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_session_events_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "search_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      search_sessions: {
+        Row: {
+          context_embedding: string | null
+          context_summary: string | null
+          created_at: string
+          id: string
+          last_seen_at: string
+          metadata: Json
+          user_id: string | null
+        }
+        Insert: {
+          context_embedding?: string | null
+          context_summary?: string | null
+          created_at?: string
+          id?: string
+          last_seen_at?: string
+          metadata?: Json
+          user_id?: string | null
+        }
+        Update: {
+          context_embedding?: string | null
+          context_summary?: string | null
+          created_at?: string
+          id?: string
+          last_seen_at?: string
+          metadata?: Json
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      user_context_preferences: {
+        Row: {
+          enabled: boolean
+          preference_key: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          enabled?: boolean
+          preference_key: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          enabled?: boolean
+          preference_key?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -816,21 +1307,37 @@ export type Database = {
         }
         Returns: boolean
       }
-      update_my_role: {
-        Args: {
-          _target_role: Database["public"]["Enums"]["app_role"]
+        update_my_role: {
+          Args: {
+            _target_role: Database["public"]["Enums"]["app_role"]
+          }
+          Returns: Json
         }
-        Returns: Json
-      }
-      admin_update_user_access: {
-        Args: {
-          _target_role: Database["public"]["Enums"]["app_role"]
-          _target_user_id: string
-          _team?: string | null
+        update_admin_chat_settings: {
+          Args: {
+            _api_key?: string | null
+            _clear_api_key?: boolean
+            _settings?: Json
+          }
+          Returns: Json
         }
-        Returns: Json
-      }
-      import_definitions_to_ontology: {
+        admin_update_user_access: {
+          Args: {
+            _target_role: Database["public"]["Enums"]["app_role"]
+            _target_user_id: string
+            _team?: string | null
+          }
+          Returns: Json
+        }
+        get_admin_chat_settings: {
+          Args: Record<PropertyKey, never>
+          Returns: Json
+        }
+        get_chat_runtime_settings: {
+          Args: Record<PropertyKey, never>
+          Returns: Json
+        }
+        import_definitions_to_ontology: {
         Args: {
           _ontology_id: string
           _rows: Json
@@ -848,10 +1355,110 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: Json
       }
+      log_search_query: {
+        Args: {
+          _analysis?: Json
+          _fallback_used?: boolean
+          _failure_bucket?: string | null
+          _filters?: Json
+          _query: string
+          _result_count?: number
+          _stage_timings?: Json
+          _strategy?: string
+          _top_results?: Json
+          _weak_evidence?: boolean
+        }
+        Returns: string
+      }
+      complete_search_index_job: {
+        Args: {
+          _error?: string | null
+          _job_id: string
+          _status?: string
+        }
+        Returns: undefined
+      }
+      claim_search_index_job: {
+        Args: {
+          _job_type?: string
+          _worker_id?: string
+        }
+        Returns: {
+          attempts: number
+          id: string
+          job_type: string
+          metadata: Json
+        }[]
+      }
+      enqueue_search_index_job: {
+        Args: {
+          _job_type?: string
+          _metadata?: Json
+        }
+        Returns: string
+      }
+      list_stale_search_documents: {
+        Args: {
+          _limit?: number
+        }
+        Returns: {
+          id: string
+          search_text: string
+        }[]
+      }
       save_search_history: {
         Args: {
           _filters?: Json
           _query: string
+        }
+        Returns: Json
+      }
+      search_entities_hybrid: {
+        Args: {
+          _analysis?: Json
+          _candidate_limit?: number
+          _context_json?: Json
+          _filters?: Json
+          _query: string
+          _query_embedding?: string | null
+          _session_id?: string | null
+          _sort_by?: string
+        }
+        Returns: {
+          applied_boosts: Json | null
+          applied_filters: Json | null
+          context_boost_score: number | null
+          dense_score: number | null
+          description: string | null
+          entity_id: string
+          entity_type: "definition" | "ontology"
+          exact_title_match: boolean | null
+          fusion_score: number | null
+          lexical_score: number | null
+          match_text: string | null
+          ontology_id: string | null
+          ontology_title: string | null
+          priority: string | null
+          rerank_score: number | null
+          retrieval_confidence: "strong" | "medium" | "weak" | null
+          status: string | null
+          tags: string[] | null
+          title: string
+          title_match: boolean | null
+          token_coverage: number | null
+          updated_at: string
+          view_count: number | null
+        }[]
+      }
+      sync_search_index_entity: {
+        Args: {
+          _entity_id: string
+        }
+        Returns: Json
+      }
+      sync_search_index_ontology_subtree: {
+        Args: {
+          _ontology_id: string
         }
         Returns: Json
       }

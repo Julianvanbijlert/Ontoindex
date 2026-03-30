@@ -49,6 +49,8 @@ function summarizeActivity(event: ActivityEventRow) {
       return `Created "${event.entity_title || "item"}".`;
     case "updated":
       return `Updated "${event.entity_title || "item"}".`;
+    case "deleted":
+      return `Deleted "${event.entity_title || "item"}".`;
     case "relationship_added":
       return `Added a relationship for "${event.entity_title || "item"}".`;
     case "relationship_removed":

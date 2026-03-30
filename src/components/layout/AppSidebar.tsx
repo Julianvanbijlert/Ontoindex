@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, BookOpen, Network, Search, GitPullRequest,
-  Bell, User, Settings, Star, Clock, LogOut, Users
+  Bell, User, Settings, Star, Clock, LogOut, Users, MessageSquare
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -16,6 +16,7 @@ import { canAccessPath } from "@/lib/app-access";
 
 const mainItems = [
   { title: "Search", url: "/search", icon: Search },
+  { title: "Chat", url: "/chat", icon: MessageSquare },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Ontologies", url: "/ontologies", icon: Network },
   { title: "Definitions", url: "/definitions", icon: BookOpen },

@@ -13,6 +13,7 @@ export interface TimelineEvent {
 const actionConfig: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   created: { icon: Plus, color: "bg-success/10 text-success", label: "Created" },
   updated: { icon: Edit2, color: "bg-info/10 text-info", label: "Edited" },
+  deleted: { icon: Edit2, color: "bg-destructive/10 text-destructive", label: "Deleted" },
   status_changed: { icon: GitPullRequest, color: "bg-warning/10 text-warning", label: "Status changed" },
   comment_added: { icon: MessageSquare, color: "bg-primary/10 text-primary", label: "Comment added" },
   relationship_added: { icon: GitBranch, color: "bg-accent/10 text-accent", label: "Relationship added" },

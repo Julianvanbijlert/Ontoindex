@@ -256,8 +256,23 @@ describe("notification-service", () => {
     expect(result).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          notification_type: "ontology_workflow_changed",
+          enabled: true,
+        }),
+        expect.objectContaining({
+          notification_type: "definition_deleted",
+          enabled: true,
+        }),
+        expect.objectContaining({
           notification_type: "comment_reply",
           enabled: true,
+        }),
+      ]),
+    );
+    expect(result).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          notification_type: "tracked_ontology_history_changed",
         }),
       ]),
     );
@@ -300,6 +315,8 @@ describe("notification-service", () => {
     await expect(fetchNotifications(client)).resolves.toEqual([]);
     await expect(fetchNotificationPreferences(client)).resolves.toEqual(
       expect.arrayContaining([
+        expect.objectContaining({ notification_type: "ontology_relation_added", enabled: true }),
+        expect.objectContaining({ notification_type: "definition_other_activity", enabled: true }),
         expect.objectContaining({ notification_type: "comment_reply", enabled: true }),
       ]),
     );

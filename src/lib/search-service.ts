@@ -1,82 +1,60 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
+import { buildSearchContextFromExperience, type SearchExperienceAdapterInput } from "@/lib/search/context/search-experience-adapter";
+import type { SearchContext } from "@/lib/search/context/types";
+import { filterAndSortSearchResults as filterLegacySearchResults, sortSearchResults as sortLegacySearchResults } from "@/lib/search-legacy-retrieval";
+import { normalizeSearchText } from "@/lib/search-normalization";
+import { normalizeSearchQuery as normalizeQuery } from "@/lib/search-query";
+import { saveSearchHistoryRpc } from "@/lib/search-rpc";
+import {
+  searchWithRetrievalGateway,
+  type SearchExecutionOptions as SearchGatewayExecutionOptions,
+  type SearchRetrievalResponse,
+} from "@/lib/search-retrieval-gateway";
+import type {
+  SearchFilters,
+  SearchHistoryEntry,
+  SearchResultItem,
+  SearchSort,
+} from "@/lib/search-types";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
-export interface SearchHistoryEntry {
-  id: string;
-  query: string;
-  created_at: string;
-  filters?: Record<string, unknown> | null;
+export type {
+  SearchFilters,
+  SearchHistoryEntry,
+  SearchResultItem,
+  SearchSort,
+} from "@/lib/search-types";
+export type { SearchRetrievalResponse } from "@/lib/search-retrieval-gateway";
+export type { SearchContext } from "@/lib/search/context/types";
+export type { SearchExperienceAdapterInput } from "@/lib/search/context/search-experience-adapter";
+
+export interface SearchExecutionOptions extends SearchGatewayExecutionOptions {
+  context?: SearchContext | null;
+  experience?: SearchExperienceAdapterInput;
 }
 
-export interface SearchFilters {
-  ontologyId: string;
-  tag: string;
-  status: string;
-  type: "all" | "definition" | "ontology";
-  ownership: "all" | "mine";
-}
-
-export type SearchSort = "relevance" | "recent" | "views" | "title";
-
-export interface SearchResultItem {
-  id: string;
-  type: "definition" | "ontology";
-  title: string;
-  description: string;
-  status: string | null;
-  updatedAt: string;
-  viewCount: number;
-  tags: string[];
-  ontologyId?: string | null;
-  ontologyTitle?: string | null;
-  priority?: string | null;
-  relevance: number;
-}
-
-function buildRelevanceScore(value: {
-  title: string;
-  description: string;
-  tags: string[];
-  ontologyTitle?: string | null;
-}, normalizedQuery: string) {
-  if (!normalizedQuery) {
-    return 0;
+function resolveExecutionContext(options?: SearchExecutionOptions) {
+  if (options?.context) {
+    return options.context;
   }
 
-  let score = 0;
-  const title = value.title.toLowerCase();
-  const description = value.description.toLowerCase();
-  const ontologyTitle = (value.ontologyTitle || "").toLowerCase();
-  const tags = value.tags.map((tag) => tag.toLowerCase());
-
-  if (title === normalizedQuery) {
-    score += 100;
-  } else if (title.startsWith(normalizedQuery)) {
-    score += 75;
-  } else if (title.includes(normalizedQuery)) {
-    score += 50;
+  if (!options?.experience) {
+    return null;
   }
 
-  if (description.includes(normalizedQuery)) {
-    score += 20;
+  try {
+    return buildSearchContextFromExperience(options.experience);
+  } catch (error) {
+    console.warn("Search context collection failed, continuing without context.", { error });
+    return null;
   }
-
-  if (ontologyTitle.includes(normalizedQuery)) {
-    score += 15;
-  }
-
-  if (tags.some((tag) => tag.includes(normalizedQuery))) {
-    score += 25;
-  }
-
-  return score;
 }
 
 export function normalizeSearchQuery(query: string) {
-  return query.trim().replace(/\s+/g, " ").toLowerCase();
+  return normalizeSearchText(normalizeQuery(query));
 }
 
 export function dedupeSearchHistory(entries: SearchHistoryEntry[]) {
@@ -106,24 +84,7 @@ export function filterSearchHistory(entries: SearchHistoryEntry[], input: string
 }
 
 export function sortSearchResults(results: SearchResultItem[], sortBy: SearchSort) {
-  return [...results].sort((left, right) => {
-    switch (sortBy) {
-      case "views":
-        return right.viewCount - left.viewCount;
-      case "recent":
-        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
-      case "title":
-        return left.title.localeCompare(right.title);
-      case "relevance":
-      default: {
-        if (right.relevance !== left.relevance) {
-          return right.relevance - left.relevance;
-        }
-
-        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
-      }
-    }
-  });
+  return sortLegacySearchResults(results, sortBy);
 }
 
 export function filterAndSortSearchResults(
@@ -134,124 +95,14 @@ export function filterAndSortSearchResults(
   sortBy: SearchSort,
   currentUserId?: string | null,
 ) {
-  const normalizedQuery = normalizeSearchQuery(query);
-
-  const definitionResults: SearchResultItem[] = definitions
-    .filter((definition) => {
-      if (filters.ownership === "mine" && definition.created_by !== currentUserId) {
-        return false;
-      }
-
-      if (filters.status !== "all" && definition.status !== filters.status) {
-        return false;
-      }
-
-      if (filters.ontologyId !== "all" && definition.ontology_id !== filters.ontologyId) {
-        return false;
-      }
-
-      if (filters.tag !== "all" && !(definition.tags || []).includes(filters.tag)) {
-        return false;
-      }
-
-      if (!normalizedQuery) {
-        return true;
-      }
-
-      const haystack = [
-        definition.title,
-        definition.description,
-        definition.content,
-        definition.ontologies?.title,
-        ...(definition.tags || []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(normalizedQuery);
-    })
-    .map((definition) => ({
-      id: definition.id,
-      type: "definition" as const,
-      title: definition.title,
-      description: definition.description || definition.content || "",
-      status: definition.status,
-      updatedAt: definition.updated_at,
-      viewCount: definition.view_count || 0,
-      tags: definition.tags || [],
-      ontologyId: definition.ontology_id,
-      ontologyTitle: definition.ontologies?.title || null,
-      priority: definition.priority,
-      relevance: buildRelevanceScore(
-        {
-          title: definition.title,
-          description: definition.description || definition.content || "",
-          tags: definition.tags || [],
-          ontologyTitle: definition.ontologies?.title || null,
-        },
-        normalizedQuery,
-      ),
-    }));
-
-  const ontologyResults: SearchResultItem[] = ontologies
-    .filter((ontology) => {
-      if (filters.ownership === "mine" && ontology.created_by !== currentUserId) {
-        return false;
-      }
-
-      if (filters.status !== "all" && ontology.status !== filters.status) {
-        return false;
-      }
-
-      if (filters.ontologyId !== "all" && ontology.id !== filters.ontologyId) {
-        return false;
-      }
-
-      if (filters.tag !== "all" && !(ontology.tags || []).includes(filters.tag)) {
-        return false;
-      }
-
-      if (!normalizedQuery) {
-        return true;
-      }
-
-      const haystack = [ontology.title, ontology.description, ...(ontology.tags || [])]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(normalizedQuery);
-    })
-    .map((ontology) => ({
-      id: ontology.id,
-      type: "ontology" as const,
-      title: ontology.title,
-      description: ontology.description || "",
-      status: ontology.status,
-      updatedAt: ontology.updated_at,
-      viewCount: ontology.view_count || 0,
-      tags: ontology.tags || [],
-      ontologyId: ontology.id,
-      ontologyTitle: ontology.title,
-      relevance: buildRelevanceScore(
-        {
-          title: ontology.title,
-          description: ontology.description || "",
-          tags: ontology.tags || [],
-        },
-        normalizedQuery,
-      ),
-    }));
-
-  const filteredByType =
-    filters.type === "definition"
-      ? definitionResults
-      : filters.type === "ontology"
-        ? ontologyResults
-        : [...definitionResults, ...ontologyResults];
-
-  return sortSearchResults(filteredByType, sortBy);
+  return filterLegacySearchResults(
+    definitions,
+    ontologies,
+    normalizeSearchQuery(query),
+    filters,
+    sortBy,
+    currentUserId,
+  );
 }
 
 export async function fetchSearchOptions(client: AppSupabaseClient) {
@@ -311,16 +162,30 @@ export async function saveSearchHistory(
     return null;
   }
 
-  const { data, error } = await client.rpc("save_search_history", {
-    _query: query.trim(),
-    _filters: filters,
-  });
+  const { data, error } = await saveSearchHistoryRpc(client, query, filters);
 
   if (error) {
     throw error;
   }
 
   return data as SearchHistoryEntry | null;
+}
+
+export async function searchEntitiesWithMeta(
+  client: AppSupabaseClient,
+  query: string,
+  filters: SearchFilters,
+  sortBy: SearchSort,
+  currentUserId?: string | null,
+  options?: SearchExecutionOptions,
+) {
+  const context = resolveExecutionContext(options);
+
+  return searchWithRetrievalGateway(client, query, filters, sortBy, currentUserId, {
+    signal: options?.signal,
+    bypassCache: options?.bypassCache,
+    context,
+  });
 }
 
 export async function searchEntities(
@@ -330,32 +195,8 @@ export async function searchEntities(
   sortBy: SearchSort,
   currentUserId?: string | null,
 ) {
-  const [definitionsResponse, ontologiesResponse] = await Promise.all([
-    client
-      .from("definitions")
-      .select("id, title, description, content, ontology_id, priority, status, tags, updated_at, view_count, created_by, ontologies(id, title)")
-      .eq("is_deleted", false),
-    client
-      .from("ontologies")
-      .select("id, title, description, status, tags, updated_at, view_count, created_by"),
-  ]);
-
-  if (definitionsResponse.error) {
-    throw definitionsResponse.error;
-  }
-
-  if (ontologiesResponse.error) {
-    throw ontologiesResponse.error;
-  }
-
-  return filterAndSortSearchResults(
-    definitionsResponse.data || [],
-    ontologiesResponse.data || [],
-    query,
-    filters,
-    sortBy,
-    currentUserId,
-  );
+  const response = await searchEntitiesWithMeta(client, query, filters, sortBy, currentUserId);
+  return response.results;
 }
 
 export async function fetchRecentFinds(client: AppSupabaseClient, userId: string) {
