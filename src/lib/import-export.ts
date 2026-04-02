@@ -1,8 +1,19 @@
 import { utils, write } from "xlsx";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { getRelationshipDisplayLabel } from "@/lib/relationship-service";
+import { mapOntologyToStandardsModel } from "@/lib/standards/mappers/ontology-to-standards";
+import type {
+  StandardsConcept,
+  StandardsConceptRelation,
+  StandardsConceptScheme,
+  StandardsLiteralTerm,
+  StandardsModel,
+  StandardsObjectTerm,
+  StandardsResourceTerm,
+  StandardsTriple,
+} from "@/lib/standards/model";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
@@ -25,6 +36,7 @@ export interface ExportableDefinition {
   tags: string[];
   updatedAt: string;
   viewCount: number;
+  metadata?: Json;
   relationships: ExportableRelationship[];
 }
 
@@ -87,6 +99,452 @@ function definitionUri(snapshot: OntologyExportSnapshot, definitionId: string) {
 
 function ontologyUri(snapshot: OntologyExportSnapshot) {
   return `https://ontologyhub.local/ontologies/${snapshot.ontology.id}`;
+}
+
+function readStringMetadata(value: Json | undefined, key: string) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function mapSnapshotToStandardsModel(snapshot: OntologyExportSnapshot): StandardsModel {
+  return mapOntologyToStandardsModel({
+    ontologyId: snapshot.ontology.id,
+    ontologyTitle: snapshot.ontology.title,
+    definitions: snapshot.definitions.map((definition) => ({
+      id: definition.id,
+      title: definition.title,
+      description: definition.description,
+      content: definition.content,
+      example: definition.example,
+      status: definition.status,
+      metadata: definition.metadata,
+      relationships: definition.relationships.map((relationship) => ({
+        id: relationship.id,
+        source_id: definition.id,
+        target_id: relationship.targetId,
+        type: relationship.type,
+        label: relationship.label,
+      })),
+    })),
+  });
+}
+
+interface CanonicalExportTriple {
+  subject: StandardsResourceTerm;
+  predicate: string;
+  object: StandardsObjectTerm;
+}
+
+function getSchemeIri(snapshot: OntologyExportSnapshot, scheme: StandardsConceptScheme) {
+  return scheme.iri?.trim() || ontologyUri(snapshot);
+}
+
+function getConceptIri(snapshot: OntologyExportSnapshot, concept: StandardsConcept) {
+  return concept.iri?.trim() || definitionUri(snapshot, concept.id);
+}
+
+function buildCanonicalTripleKey(triple: CanonicalExportTriple) {
+  const objectKey = triple.object.termType === "literal"
+    ? `literal:${triple.object.value}:${triple.object.language || ""}:${triple.object.datatypeIri || ""}`
+    : `${triple.object.termType}:${triple.object.value}`;
+
+  return `${triple.subject.termType}:${triple.subject.value}|${triple.predicate}|${objectKey}`;
+}
+
+function pushCanonicalTriple(target: CanonicalExportTriple[], seen: Set<string>, triple: CanonicalExportTriple) {
+  const key = buildCanonicalTripleKey(triple);
+
+  if (!seen.has(key)) {
+    seen.add(key);
+    target.push(triple);
+  }
+}
+
+function buildCanonicalTriples(snapshot: OntologyExportSnapshot, model: StandardsModel): CanonicalExportTriple[] {
+  const triples: CanonicalExportTriple[] = [];
+  const seen = new Set<string>();
+  const schemeIriById = new Map(model.conceptSchemes.map((scheme) => [scheme.id, getSchemeIri(snapshot, scheme)]));
+  const conceptById = new Map(model.concepts.map((concept) => [concept.id, concept]));
+
+  for (const scheme of model.conceptSchemes) {
+    const subject: StandardsResourceTerm = {
+      termType: "iri",
+      value: getSchemeIri(snapshot, scheme),
+    };
+
+    pushCanonicalTriple(triples, seen, {
+      subject,
+      predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+      object: {
+        termType: "iri",
+        value: "http://www.w3.org/2004/02/skos/core#ConceptScheme",
+      },
+    });
+    pushCanonicalTriple(triples, seen, {
+      subject,
+      predicate: "http://www.w3.org/2004/02/skos/core#prefLabel",
+      object: {
+        termType: "literal",
+        value: scheme.label,
+      },
+    });
+
+    if (scheme.definition) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "http://www.w3.org/2004/02/skos/core#definition",
+        object: {
+          termType: "literal",
+          value: scheme.definition,
+        },
+      });
+    }
+  }
+
+  for (const concept of model.concepts) {
+    const subject: StandardsResourceTerm = {
+      termType: "iri",
+      value: getConceptIri(snapshot, concept),
+    };
+    const schemeIri = schemeIriById.get(concept.schemeId) || ontologyUri(snapshot);
+
+    pushCanonicalTriple(triples, seen, {
+      subject,
+      predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+      object: {
+        termType: "iri",
+        value: "http://www.w3.org/2004/02/skos/core#Concept",
+      },
+    });
+    pushCanonicalTriple(triples, seen, {
+      subject,
+      predicate: "http://www.w3.org/2004/02/skos/core#inScheme",
+      object: {
+        termType: "iri",
+        value: schemeIri,
+      },
+    });
+    pushCanonicalTriple(triples, seen, {
+      subject,
+      predicate: "http://www.w3.org/2004/02/skos/core#prefLabel",
+      object: {
+        termType: "literal",
+        value: concept.prefLabel,
+      },
+    });
+
+    for (const altLabel of concept.altLabels || []) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "http://www.w3.org/2004/02/skos/core#altLabel",
+        object: {
+          termType: "literal",
+          value: altLabel,
+        },
+      });
+    }
+
+    if (concept.definition) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "http://www.w3.org/2004/02/skos/core#definition",
+        object: {
+          termType: "literal",
+          value: concept.definition,
+        },
+      });
+    }
+
+    if (concept.scopeNote) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "http://www.w3.org/2004/02/skos/core#scopeNote",
+        object: {
+          termType: "literal",
+          value: concept.scopeNote,
+        },
+      });
+    }
+
+    if (concept.example) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "http://www.w3.org/2004/02/skos/core#example",
+        object: {
+          termType: "literal",
+          value: concept.example,
+        },
+      });
+    }
+
+    if (concept.status) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "https://ontologyhub.local/schema#status",
+        object: {
+          termType: "literal",
+          value: concept.status,
+        },
+      });
+    }
+
+    if (concept.namespace) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "https://ontologyhub.local/schema#namespace",
+        object: {
+          termType: "literal",
+          value: concept.namespace,
+        },
+      });
+    }
+
+    if (concept.section) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "https://ontologyhub.local/schema#section",
+        object: {
+          termType: "literal",
+          value: concept.section,
+        },
+      });
+    }
+
+    if (concept.group) {
+      pushCanonicalTriple(triples, seen, {
+        subject,
+        predicate: "https://ontologyhub.local/schema#group",
+        object: {
+          termType: "literal",
+          value: concept.group,
+        },
+      });
+    }
+  }
+
+  for (const relation of model.conceptRelations) {
+    const sourceConcept = conceptById.get(relation.sourceConceptId);
+    const targetConcept = conceptById.get(relation.targetConceptId);
+
+    if (!sourceConcept || !targetConcept) {
+      continue;
+    }
+
+    pushCanonicalTriple(triples, seen, {
+      subject: {
+        termType: "iri",
+        value: getConceptIri(snapshot, sourceConcept),
+      },
+      predicate: relation.predicateIri || "http://www.w3.org/2004/02/skos/core#related",
+      object: {
+        termType: "iri",
+        value: getConceptIri(snapshot, targetConcept),
+      },
+    });
+  }
+
+  for (const triple of model.triples) {
+    pushCanonicalTriple(triples, seen, {
+      subject: triple.subject,
+      predicate: triple.predicate.value,
+      object: triple.object,
+    });
+  }
+
+  return triples;
+}
+
+const namespacePrefixes = [
+  ["rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"],
+  ["rdfs", "http://www.w3.org/2000/01/rdf-schema#"],
+  ["owl", "http://www.w3.org/2002/07/owl#"],
+  ["skos", "http://www.w3.org/2004/02/skos/core#"],
+  ["onto", "https://ontologyhub.local/schema#"],
+] as const;
+
+function compactIri(value: string) {
+  if (value === "http://www.w3.org/1999/02/22-rdf-syntax-ns#type") {
+    return "a";
+  }
+
+  for (const [prefix, namespace] of namespacePrefixes) {
+    if (value.startsWith(namespace)) {
+      return `${prefix}:${value.slice(namespace.length)}`;
+    }
+  }
+
+  return `<${value}>`;
+}
+
+function serializeNTriplesTerm(term: StandardsResourceTerm | StandardsLiteralTerm) {
+  if (term.termType === "iri") {
+    return `<${term.value}>`;
+  }
+
+  if (term.termType === "blank-node") {
+    return term.value;
+  }
+
+  const escaped = `"${escapeLiteral(term.value)}"`;
+
+  if (term.language) {
+    return `${escaped}@${term.language}`;
+  }
+
+  if (term.datatypeIri) {
+    return `${escaped}^^<${term.datatypeIri}>`;
+  }
+
+  return escaped;
+}
+
+function serializeTurtleTerm(term: StandardsResourceTerm | StandardsLiteralTerm) {
+  if (term.termType === "iri") {
+    return compactIri(term.value);
+  }
+
+  if (term.termType === "blank-node") {
+    return term.value;
+  }
+
+  return serializeNTriplesTerm(term);
+}
+
+function serializeNTriples(triples: CanonicalExportTriple[]) {
+  return triples
+    .map((triple) => `${serializeNTriplesTerm(triple.subject)} <${triple.predicate}> ${serializeNTriplesTerm(triple.object)} .`)
+    .join("\n");
+}
+
+function serializeTurtle(triples: CanonicalExportTriple[]) {
+  const grouped = new Map<string, CanonicalExportTriple[]>();
+
+  for (const triple of triples) {
+    const key = serializeNTriplesTerm(triple.subject);
+    const bucket = grouped.get(key) || [];
+    bucket.push(triple);
+    grouped.set(key, bucket);
+  }
+
+  const prefixBlock = namespacePrefixes
+    .map(([prefix, namespace]) => `@prefix ${prefix}: <${namespace}> .`)
+    .join("\n");
+  const subjectBlocks = Array.from(grouped.entries()).map(([subject, subjectTriples]) => {
+    const predicateGroups = new Map<string, string[]>();
+
+    for (const triple of subjectTriples) {
+      const predicate = compactIri(triple.predicate);
+      const object = serializeTurtleTerm(triple.object);
+      const values = predicateGroups.get(predicate) || [];
+      values.push(object);
+      predicateGroups.set(predicate, values);
+    }
+
+    const predicateLines = Array.from(predicateGroups.entries()).map(([predicate, objects]) => `  ${predicate} ${objects.join(", ")}`);
+
+    return `${subject} ${predicateLines.join(" ;\n")} .`;
+  });
+
+  return `${prefixBlock}\n\n${subjectBlocks.join("\n\n")}`;
+}
+
+function serializeRdfXml(triples: CanonicalExportTriple[]) {
+  const grouped = new Map<string, CanonicalExportTriple[]>();
+
+  for (const triple of triples) {
+    const key = triple.subject.value;
+    const bucket = grouped.get(key) || [];
+    bucket.push(triple);
+    grouped.set(key, bucket);
+  }
+
+  const body = Array.from(grouped.entries()).map(([subject, subjectTriples]) => {
+    const typeTriple = subjectTriples.find((triple) => triple.predicate === "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" && triple.object.termType === "iri");
+    const typedName = typeTriple?.object.termType === "iri" ? compactIri(typeTriple.object.value) : null;
+    const elementName = typedName && typedName !== "a" ? typedName : "rdf:Description";
+    const propertyTriples = subjectTriples.filter((triple) => triple !== typeTriple);
+    const propertyXml = propertyTriples.map((triple) => {
+      const predicateName = compactIri(triple.predicate);
+
+      if (triple.object.termType === "iri" || triple.object.termType === "blank-node") {
+        return `    <${predicateName} rdf:resource="${escapeXml(triple.object.value)}" />`;
+      }
+
+      return `    <${predicateName}>${escapeXml(triple.object.value)}</${predicateName}>`;
+    }).join("\n");
+
+    return [
+      `  <${elementName} rdf:about="${escapeXml(subject)}">`,
+      propertyXml,
+      `  </${elementName}>`,
+    ].filter(Boolean).join("\n");
+  }).join("\n");
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF ${namespacePrefixes.map(([prefix, namespace]) => `xmlns:${prefix}="${namespace}"`).join(" ")}>\n${body}\n</rdf:RDF>`;
+}
+
+function buildJsonLdGraph(snapshot: OntologyExportSnapshot, model: StandardsModel) {
+  const schemeIriById = new Map(model.conceptSchemes.map((scheme) => [scheme.id, getSchemeIri(snapshot, scheme)]));
+  const conceptById = new Map(model.concepts.map((concept) => [concept.id, concept]));
+  const relationGroups = new Map<string, StandardsConceptRelation[]>();
+
+  for (const relation of model.conceptRelations) {
+    const bucket = relationGroups.get(relation.sourceConceptId) || [];
+    bucket.push(relation);
+    relationGroups.set(relation.sourceConceptId, bucket);
+  }
+
+  const graph: Array<Record<string, unknown>> = model.conceptSchemes.map((scheme) => ({
+    "@id": getSchemeIri(snapshot, scheme),
+    "@type": "skos:ConceptScheme",
+    "skos:prefLabel": scheme.label,
+    ...(scheme.definition ? { "skos:definition": scheme.definition } : {}),
+    ...(scheme.status ? { "onto:status": scheme.status } : {}),
+  }));
+
+  for (const concept of model.concepts) {
+    const conceptIri = getConceptIri(snapshot, concept);
+    const entry: Record<string, unknown> = {
+      "@id": conceptIri,
+      "@type": "skos:Concept",
+      "skos:prefLabel": concept.prefLabel,
+      "skos:inScheme": { "@id": schemeIriById.get(concept.schemeId) || ontologyUri(snapshot) },
+      ...(concept.definition ? { "skos:definition": concept.definition } : {}),
+      ...(concept.scopeNote ? { "skos:scopeNote": concept.scopeNote } : {}),
+      ...(concept.example ? { "skos:example": concept.example } : {}),
+      ...(concept.altLabels?.length ? { "skos:altLabel": concept.altLabels } : {}),
+      ...(concept.status ? { "onto:status": concept.status } : {}),
+      ...(concept.namespace ? { "onto:namespace": concept.namespace } : {}),
+      ...(concept.section ? { "onto:section": concept.section } : {}),
+      ...(concept.group ? { "onto:group": concept.group } : {}),
+    };
+
+    for (const relation of relationGroups.get(concept.id) || []) {
+      const targetConcept = conceptById.get(relation.targetConceptId);
+
+      if (!targetConcept) {
+        continue;
+      }
+
+      const key = compactIri(relation.predicateIri || "http://www.w3.org/2004/02/skos/core#related");
+      const existing = entry[key];
+      const target = { "@id": getConceptIri(snapshot, targetConcept) };
+
+      if (!existing) {
+        entry[key] = [target];
+      } else if (Array.isArray(existing)) {
+        existing.push(target);
+      }
+    }
+
+    graph.push(entry);
+  }
+
+  return graph;
 }
 
 function mapDefinitionsToRows(snapshot: OntologyExportSnapshot) {
@@ -212,35 +670,9 @@ class TurtleExporter implements Exporter {
   mimeType = "text/turtle;charset=utf-8";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const prefixes = [
-      "@prefix onto: <https://ontologyhub.local/schema#> .",
-      "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
-      "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
-      "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
-      "",
-    ].join("\n");
-
-    const ontologyBlock = `<${ontologyUri(snapshot)}> a owl:Ontology ;\n  rdfs:label "${escapeLiteral(snapshot.ontology.title)}" ;\n  rdfs:comment "${escapeLiteral(snapshot.ontology.description)}" .`;
-    const definitionBlocks = snapshot.definitions.map((definition) => {
-      const relationLines = definition.relationships
-        .map((relationship) => `  onto:relatedDefinition <${definitionUri(snapshot, relationship.targetId)}> ;`)
-        .join("\n");
-
-      return [
-        `<${definitionUri(snapshot, definition.id)}> a onto:Definition ;`,
-        `  rdfs:label "${escapeLiteral(definition.title)}" ;`,
-        `  rdfs:comment "${escapeLiteral(definition.description)}" ;`,
-        `  onto:context "${escapeLiteral(definition.content)}" ;`,
-        `  onto:status "${escapeLiteral(definition.status)}" ;`,
-        `  onto:priority "${escapeLiteral(definition.priority)}" ;`,
-        relationLines,
-        `  onto:inOntology <${ontologyUri(snapshot)}> .`,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    });
-
-    return createStringResult(snapshot, this, `${prefixes}${ontologyBlock}\n\n${definitionBlocks.join("\n\n")}`);
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const triples = buildCanonicalTriples(snapshot, standardsModel);
+    return createStringResult(snapshot, this, serializeTurtle(triples));
   }
 }
 
@@ -251,29 +683,8 @@ class JsonLdExporter implements Exporter {
   mimeType = "application/ld+json";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const graph = [
-      {
-        "@id": ontologyUri(snapshot),
-        "@type": "owl:Ontology",
-        "rdfs:label": snapshot.ontology.title,
-        "rdfs:comment": snapshot.ontology.description,
-      },
-      ...snapshot.definitions.map((definition) => ({
-        "@id": definitionUri(snapshot, definition.id),
-        "@type": "onto:Definition",
-        "rdfs:label": definition.title,
-        "rdfs:comment": definition.description,
-        "onto:context": definition.content,
-        "onto:priority": definition.priority,
-        "onto:status": definition.status,
-        "onto:tags": definition.tags,
-        "onto:relatedDefinition": definition.relationships.map((relationship) => ({
-          "@id": definitionUri(snapshot, relationship.targetId),
-          "rdfs:label": relationship.targetTitle,
-          "onto:relationshipType": getRelationshipDisplayLabel(relationship.type, relationship.label),
-        })),
-      })),
-    ];
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const graph = buildJsonLdGraph(snapshot, standardsModel);
 
     return createStringResult(
       snapshot,
@@ -284,6 +695,7 @@ class JsonLdExporter implements Exporter {
             onto: "https://ontologyhub.local/schema#",
             owl: "http://www.w3.org/2002/07/owl#",
             rdfs: "http://www.w3.org/2000/01/rdf-schema#",
+            skos: "http://www.w3.org/2004/02/skos/core#",
           },
           "@graph": graph,
         },
@@ -301,19 +713,8 @@ class NTriplesExporter implements Exporter {
   mimeType = "application/n-triples;charset=utf-8";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const lines = snapshot.definitions.flatMap((definition) => {
-      const subject = `<${definitionUri(snapshot, definition.id)}>`;
-      return [
-        `${subject} <http://www.w3.org/2000/01/rdf-schema#label> "${escapeLiteral(definition.title)}" .`,
-        `${subject} <http://www.w3.org/2000/01/rdf-schema#comment> "${escapeLiteral(definition.description)}" .`,
-        ...definition.relationships.map(
-          (relationship) =>
-            `${subject} <https://ontologyhub.local/schema#relatedDefinition> <${definitionUri(snapshot, relationship.targetId)}> .`,
-        ),
-      ];
-    });
-
-    return createStringResult(snapshot, this, lines.join("\n"));
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    return createStringResult(snapshot, this, serializeNTriples(buildCanonicalTriples(snapshot, standardsModel)));
   }
 }
 
@@ -324,33 +725,8 @@ class RdfXmlExporter implements Exporter {
   mimeType = "application/rdf+xml";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const body = snapshot.definitions
-      .map((definition) => {
-        const relationXml = definition.relationships
-          .map(
-            (relationship) =>
-              `    <onto:relatedDefinition rdf:resource="${escapeXml(definitionUri(snapshot, relationship.targetId))}" />`,
-          )
-          .join("\n");
-
-        return [
-          `  <rdf:Description rdf:about="${escapeXml(definitionUri(snapshot, definition.id))}">`,
-          `    <rdfs:label>${escapeXml(definition.title)}</rdfs:label>`,
-          `    <rdfs:comment>${escapeXml(definition.description)}</rdfs:comment>`,
-          `    <onto:context>${escapeXml(definition.content)}</onto:context>`,
-          relationXml,
-          "  </rdf:Description>",
-        ]
-          .filter(Boolean)
-          .join("\n");
-      })
-      .join("\n");
-
-    return createStringResult(
-      snapshot,
-      this,
-      `<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:onto="https://ontologyhub.local/schema#">\n${body}\n</rdf:RDF>`,
-    );
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    return createStringResult(snapshot, this, serializeRdfXml(buildCanonicalTriples(snapshot, standardsModel)));
   }
 }
 
@@ -361,15 +737,14 @@ class OwlExporter implements Exporter {
   mimeType = "application/rdf+xml";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const body = snapshot.definitions
-      .map(
-        (definition) => [
-          `  <owl:Class rdf:about="${escapeXml(definitionUri(snapshot, definition.id))}">`,
-          `    <rdfs:label>${escapeXml(definition.title)}</rdfs:label>`,
-          `    <rdfs:comment>${escapeXml(definition.description)}</rdfs:comment>`,
-          "  </owl:Class>",
-        ].join("\n"),
-      )
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const body = standardsModel.concepts
+      .map((concept) => [
+        `  <owl:Class rdf:about="${escapeXml(getConceptIri(snapshot, concept))}">`,
+        `    <rdfs:label>${escapeXml(concept.prefLabel)}</rdfs:label>`,
+        ...(concept.definition ? [`    <rdfs:comment>${escapeXml(concept.definition)}</rdfs:comment>`] : []),
+        "  </owl:Class>",
+      ].join("\n"))
       .join("\n");
 
     return createStringResult(
@@ -387,31 +762,8 @@ class SkosExporter implements Exporter {
   mimeType = "text/turtle;charset=utf-8";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const conceptScheme = `<${ontologyUri(snapshot)}> a skos:ConceptScheme ;\n  skos:prefLabel "${escapeLiteral(snapshot.ontology.title)}" ;\n  skos:definition "${escapeLiteral(snapshot.ontology.description)}" .`;
-    const concepts = snapshot.definitions.map((definition) => {
-      const relationLines = definition.relationships
-        .map((relationship) => {
-          const predicate = relationship.type === "is_a" || relationship.type === "part_of" ? "skos:broader" : "skos:related";
-          return `  ${predicate} <${definitionUri(snapshot, relationship.targetId)}> ;`;
-        })
-        .join("\n");
-
-      return [
-        `<${definitionUri(snapshot, definition.id)}> a skos:Concept ;`,
-        `  skos:prefLabel "${escapeLiteral(definition.title)}" ;`,
-        `  skos:definition "${escapeLiteral(definition.description)}" ;`,
-        relationLines,
-        `  skos:inScheme <${ontologyUri(snapshot)}> .`,
-      ]
-        .filter(Boolean)
-        .join("\n");
-    });
-
-    return createStringResult(
-      snapshot,
-      this,
-      `@prefix skos: <http://www.w3.org/2004/02/skos/core#> .\n\n${conceptScheme}\n\n${concepts.join("\n\n")}`,
-    );
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    return createStringResult(snapshot, this, serializeTurtle(buildCanonicalTriples(snapshot, standardsModel)));
   }
 }
 
@@ -422,18 +774,17 @@ class XmiExporter implements Exporter {
   mimeType = "application/xml";
 
   async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
-    const classes = snapshot.definitions
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const classes = standardsModel.concepts
       .map(
-        (definition) =>
-          `    <packagedElement xmi:type="uml:Class" xmi:id="${escapeXml(definition.id)}" name="${escapeXml(definition.title)}">\n      <ownedComment body="${escapeXml(definition.description)}" />\n    </packagedElement>`,
+        (concept) =>
+          `    <packagedElement xmi:type="uml:Class" xmi:id="${escapeXml(concept.id)}" name="${escapeXml(concept.prefLabel)}">\n      <ownedComment body="${escapeXml(concept.definition || "")}" />\n    </packagedElement>`,
       )
       .join("\n");
-    const associations = snapshot.definitions
-      .flatMap((definition) =>
-        definition.relationships.map(
-          (relationship) =>
-            `    <packagedElement xmi:type="uml:Association" xmi:id="${escapeXml(relationship.id)}" name="${escapeXml(getRelationshipDisplayLabel(relationship.type, relationship.label))}" memberEnd="${escapeXml(definition.id)} ${escapeXml(relationship.targetId)}" />`,
-        ),
+    const associations = standardsModel.conceptRelations
+      .map(
+        (relation) =>
+          `    <packagedElement xmi:type="uml:Association" xmi:id="${escapeXml(relation.id)}" name="${escapeXml(relation.label || relation.kind)}" memberEnd="${escapeXml(relation.sourceConceptId)} ${escapeXml(relation.targetConceptId)}" />`,
       )
       .join("\n");
 

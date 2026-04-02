@@ -259,7 +259,11 @@ export async function embedTexts(
   input: string[],
   options?: Parameters<typeof readSearchEmbeddingConfig>[0],
 ) {
-  const env = options?.env || (typeof Deno !== "undefined" ? Deno.env.toObject() : {});
+  const env = options?.env || (
+    typeof globalThis !== "undefined" && "Deno" in globalThis
+      ? (globalThis as { Deno?: { env: { toObject(): Record<string, string | undefined> } } }).Deno?.env.toObject() || {}
+      : {}
+  );
   const config = readSearchEmbeddingConfig(options);
   const attempts: Array<{ provider: EmbeddingProvider; error?: string }> = [];
   const configuredProviders = config.providers.filter((provider) => {

@@ -1,3 +1,4 @@
+import React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -5,17 +6,25 @@ import { toast } from "sonner";
 
 import AdminUsers from "@/pages/AdminUsers";
 
-const navigate = vi.fn();
-const authState = {
-  user: { id: "user-1" },
-  role: "admin",
-  syncCurrentUserRole: vi.fn().mockResolvedValue(undefined),
-};
-
-const profilesOrder = vi.fn();
-const profilesSelect = vi.fn();
-const fetchPrimaryRolesForUsers = vi.fn();
-const updateUserRoleAsAdmin = vi.fn();
+const {
+  authState,
+  fetchPrimaryRolesForUsers,
+  navigate,
+  profilesOrder,
+  profilesSelect,
+  updateUserRoleAsAdmin,
+} = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  authState: {
+    user: { id: "user-1" },
+    role: "admin",
+    syncCurrentUserRole: vi.fn().mockResolvedValue(undefined),
+  },
+  profilesOrder: vi.fn(),
+  profilesSelect: vi.fn(),
+  fetchPrimaryRolesForUsers: vi.fn(),
+  updateUserRoleAsAdmin: vi.fn(),
+}));
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -53,12 +62,11 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 vi.mock("@/lib/role-service", () => ({
-  fetchPrimaryRolesForUsers: (...args: unknown[]) => fetchPrimaryRolesForUsers(...args),
-  updateUserRoleAsAdmin: (...args: unknown[]) => updateUserRoleAsAdmin(...args),
+  fetchPrimaryRolesForUsers,
+  updateUserRoleAsAdmin,
 }));
 
 vi.mock("@/components/ui/select", () => {
-  const React = require("react");
   const SelectContext = React.createContext<(value: string) => void>(() => undefined);
 
   return {

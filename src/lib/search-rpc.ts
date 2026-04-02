@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import type { SearchRetrievalDiagnostics } from "@/lib/search-diagnostics-logger";
 import type { SearchContext } from "@/lib/search/context/types";
 import type { SearchQueryAnalysis } from "@/lib/search-query-understanding";
@@ -12,6 +12,10 @@ type SearchHybridArgs = Database["public"]["Functions"]["search_entities_hybrid"
 type SearchHybridReturns = Database["public"]["Functions"]["search_entities_hybrid"]["Returns"];
 type LogSearchArgs = Database["public"]["Functions"]["log_search_query"]["Args"];
 type SaveSearchHistoryArgs = Database["public"]["Functions"]["save_search_history"]["Args"];
+
+function asJson<T>(value: T): Json {
+  return value as unknown as Json;
+}
 
 function serializeSearchFilters(filters: SearchFilters): SearchHybridArgs["_filters"] {
   return {
@@ -30,7 +34,7 @@ function serializeSearchAnalysis(
     similaritySignals?: SearchSimilaritySignal[];
   },
 ): SearchHybridArgs["_analysis"] {
-  return {
+  return asJson({
     originalQuery: analysis.originalQuery,
     normalizedQuery: analysis.normalizedQuery,
     rewrittenQueries: analysis.rewrittenQueries,
@@ -55,7 +59,7 @@ function serializeSearchAnalysis(
       queryVariants: input?.queryVariants || [],
       similaritySignals: input?.similaritySignals || [],
     },
-  };
+  }) as SearchHybridArgs["_analysis"];
 }
 
 function normalizeContextSessionId(value: string | null | undefined): string | null {
@@ -70,10 +74,10 @@ function normalizeContextSessionId(value: string | null | undefined): string | n
 
 function serializeSearchContext(context: SearchContext | null | undefined): SearchHybridArgs["_context_json"] {
   if (!context) {
-    return {};
+    return asJson({}) as SearchHybridArgs["_context_json"];
   }
 
-  return {
+  return asJson({
     scope: {
       routePath: context.scope.routePath,
       page: context.scope.page,
@@ -110,7 +114,7 @@ function serializeSearchContext(context: SearchContext | null | undefined): Sear
     retrievalPlan: context.retrievalPlan,
     contextHash: context.contextHash,
     debug: context.debug,
-  };
+  }) as SearchHybridArgs["_context_json"];
 }
 
 export async function callHybridSearchRpc(
@@ -141,7 +145,7 @@ export async function callHybridSearchRpc(
     _session_id: normalizeContextSessionId(input.context?.session.sessionId),
   };
 
-  return client.rpc("search_entities_hybrid", args) as Promise<{
+  return client.rpc("search_entities_hybrid", args) as unknown as Promise<{
     data: SearchHybridReturns | null;
     error: Error | null;
   }>;
@@ -151,8 +155,10 @@ function serializeLogAnalysis(
   analysis: SearchQueryAnalysis,
   diagnostics: SearchRetrievalDiagnostics,
 ) {
-  return {
-    ...serializeSearchAnalysis(analysis),
+  const serializedAnalysis = serializeSearchAnalysis(analysis) as unknown as Record<string, unknown>;
+
+  return asJson({
+    ...serializedAnalysis,
     observability: {
       queryType: diagnostics.queryType,
       retrievalConfidence: diagnostics.retrievalConfidence,
@@ -162,7 +168,7 @@ function serializeLogAnalysis(
       failure: diagnostics.failure,
       debug: diagnostics.debug,
     },
-  };
+  });
 }
 
 function serializeTopResults(results: SearchResultItem[]): NonNullable<LogSearchArgs["_top_results"]> {
@@ -177,7 +183,7 @@ function serializeTopResults(results: SearchResultItem[]): NonNullable<LogSearch
 }
 
 function serializeStageTimings(diagnostics: SearchRetrievalDiagnostics): NonNullable<LogSearchArgs["_stage_timings"]> {
-  return {
+  return asJson({
     ...diagnostics.stageTimings,
     queryType: diagnostics.queryType,
     retrievalConfidence: diagnostics.retrievalConfidence,
@@ -185,7 +191,7 @@ function serializeStageTimings(diagnostics: SearchRetrievalDiagnostics): NonNull
     cacheHit: diagnostics.cacheHit,
     context: diagnostics.context,
     sourceContributions: diagnostics.sourceContributions,
-  };
+  }) as NonNullable<LogSearchArgs["_stage_timings"]>;
 }
 
 export async function logSearchQueryRpc(
@@ -221,10 +227,10 @@ export async function saveSearchHistoryRpc(
 ) {
   const args: SaveSearchHistoryArgs = {
     _query: query.trim(),
-    _filters: filters,
+    _filters: filters as unknown as SaveSearchHistoryArgs["_filters"],
   };
 
-  return client.rpc("save_search_history", args) as Promise<{
+  return client.rpc("save_search_history", args) as unknown as Promise<{
     data: SearchHistoryEntry | null;
     error: Error | null;
   }>;

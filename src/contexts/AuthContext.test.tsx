@@ -1,29 +1,49 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 
-const profilesSingle = vi.fn();
-const profilesEq = vi.fn().mockReturnValue({ single: profilesSingle });
-const profilesSelect = vi.fn().mockReturnValue({ eq: profilesEq });
+const {
+  getSession,
+  onAuthStateChange,
+  profilesSelect,
+  profilesEq,
+  profilesSingle,
+  userRolesSelect,
+  userRolesIn,
+} = vi.hoisted(() => {
+  const profilesSingle = vi.fn();
+  const profilesEq = vi.fn().mockReturnValue({ single: profilesSingle });
+  const profilesSelect = vi.fn().mockReturnValue({ eq: profilesEq });
 
-const userRolesIn = vi.fn();
-const userRolesSelect = vi.fn().mockReturnValue({ in: userRolesIn });
+  const userRolesIn = vi.fn();
+  const userRolesSelect = vi.fn().mockReturnValue({ in: userRolesIn });
 
-const getSession = vi.fn();
-const onAuthStateChange = vi.fn(() => ({
-  data: {
-    subscription: {
-      unsubscribe: vi.fn(),
+  const getSession = vi.fn();
+  const onAuthStateChange = vi.fn(() => ({
+    data: {
+      subscription: {
+        unsubscribe: vi.fn(),
+      },
     },
-  },
-}));
+  }));
+
+  return {
+    getSession,
+    onAuthStateChange,
+    profilesSelect,
+    profilesEq,
+    profilesSingle,
+    userRolesSelect,
+    userRolesIn,
+  };
+});
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     auth: {
-      getSession: (...args: unknown[]) => getSession(...args),
-      onAuthStateChange: (...args: unknown[]) => onAuthStateChange(...args),
+      getSession,
+      onAuthStateChange,
     },
     from: vi.fn((table: string) => {
       if (table === "profiles") {
@@ -152,7 +172,7 @@ describe("AuthContext", () => {
 
     await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("editor"));
 
-    screen.getByRole("button", { name: /switch to admin/i }).click();
+    fireEvent.click(screen.getByRole("button", { name: /switch to admin/i }));
 
     await waitFor(() => expect(screen.getByTestId("role")).toHaveTextContent("admin"));
     expect(userRolesIn).toHaveBeenNthCalledWith(2, "user_id", ["user-1"]);

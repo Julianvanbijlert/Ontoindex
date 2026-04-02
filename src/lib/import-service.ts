@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { buildRelationshipPayload } from "@/lib/relationship-service";
 import { ImportFactory, supportedImportColumns, type ParsedImportBundle, type ParsedImportRow } from "@/lib/import-factory";
+import { extractErrorMessage, normalizeSearchSyncErrorMessage } from "@/lib/search-index-errors";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
@@ -24,6 +25,14 @@ function buildResult(params: Pick<ImportResult, "success" | "imported" | "errors
     errorCount: params.errors.length,
     warningCount: params.warnings.length,
   };
+}
+
+function normalizeImportFailureMessage(error: unknown) {
+  return normalizeSearchSyncErrorMessage(error, "Import", "Import failed.");
+}
+
+function hasPersistableRowMetadata(rows: ParsedImportRow[]) {
+  return rows.some((row) => row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata));
 }
 
 export async function parseImportFile(file: File) {
@@ -62,6 +71,7 @@ async function directPersistImportBundle(
         tags: row.tags,
         priority: row.priority ?? "normal",
         status: row.status ?? "draft",
+        metadata: row.metadata ?? null,
         ontology_id: ontologyId,
         created_by: user.id,
       })
@@ -165,7 +175,7 @@ export async function importDefinitionsToOntology(
     const bundle = await parseImportFile(file);
 
     try {
-      if (bundle.relationships.length === 0) {
+      if (bundle.relationships.length === 0 && !hasPersistableRowMetadata(bundle.rows)) {
         const rpcResult = await attemptLegacyRpc(client, ontologyId, bundle.rows);
 
         return buildResult({
@@ -175,13 +185,12 @@ export async function importDefinitionsToOntology(
           warnings: [...bundle.warnings, ...(rpcResult.warnings || [])],
         });
       }
+
+      if (bundle.relationships.length === 0 && hasPersistableRowMetadata(bundle.rows)) {
+        bundle.warnings.push("The import included ontology metadata that the legacy database RPC cannot preserve, so the import completed through the direct persistence fallback.");
+      }
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "object" && error !== null && "message" in error
-            ? String((error as { message?: unknown }).message)
-            : String(error);
+      const message = extractErrorMessage(error) || String(error);
 
       if (!/import_definitions_to_ontology/i.test(message) || !/schema cache|could not find/i.test(message)) {
         throw error;
@@ -202,7 +211,7 @@ export async function importDefinitionsToOntology(
     return buildResult({
       success: false,
       imported: 0,
-      errors: [error instanceof Error ? error.message : "Import failed."],
+      errors: [normalizeImportFailureMessage(error)],
       warnings: [],
     });
   }

@@ -142,7 +142,7 @@ export default function DefinitionDetail() {
         .eq("approval_request_id", reviewRes.data.id)
         .order("created_at", { ascending: true });
 
-      const assignments = (assignmentsRes.data || []) as ReviewAssignmentRecord[];
+      const assignments = (assignmentsRes.data || []) as unknown as ReviewAssignmentRecord[];
       const reviewerIds = assignments.map((assignment) => assignment.reviewer_user_id).filter(Boolean) as string[];
 
       if (reviewerIds.length > 0) {

@@ -144,4 +144,274 @@ describe("import-service", () => {
       }),
     );
   });
+
+  it("uses direct persistence when semantic import metadata would be lost by the legacy rpc", async () => {
+    const definitionSingle = vi.fn().mockResolvedValue({ data: { id: "definition-iri-1" }, error: null });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      if (table === "activity_events") {
+        return { insert: activityInsert };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    const rpc = vi.fn().mockResolvedValue({
+      data: { importedCount: 1, warnings: [] },
+      error: null,
+    });
+    const client = {
+      rpc,
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      },
+      from,
+    } as any;
+    const file = {
+      name: "definitions.jsonld",
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          "@graph": [
+            {
+              "@id": "https://example.com/security#AccessPolicy",
+              "rdfs:label": "Access Policy",
+              "rdfs:comment": "Policy definition",
+              "onto:namespace": "security",
+              "onto:section": "governance",
+              "onto:group": "policies",
+            },
+          ],
+        }),
+      ),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result).toMatchObject({
+      success: true,
+      imported: 1,
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(definitionInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ontology_id: "onto-1",
+        created_by: "user-1",
+        title: "Access Policy",
+        metadata: {
+          iri: "https://example.com/security#AccessPolicy",
+          namespace: "security",
+          section: "governance",
+          group: "policies",
+        },
+      }),
+    );
+  });
+
+  it("persists the compatibility projection of a canonical semantic import with projected relationships", async () => {
+    const definitionSingles = [
+      vi.fn().mockResolvedValue({ data: { id: "definition-1" }, error: null }),
+      vi.fn().mockResolvedValue({ data: { id: "definition-2" }, error: null }),
+    ];
+    const definitionSelect = vi
+      .fn()
+      .mockReturnValueOnce({ single: definitionSingles[0] })
+      .mockReturnValueOnce({ single: definitionSingles[1] });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const relationshipInsert = vi.fn().mockResolvedValue({ error: null });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      if (table === "relationships") {
+        return { insert: relationshipInsert };
+      }
+
+      if (table === "activity_events") {
+        return { insert: activityInsert };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    const rpc = vi.fn().mockResolvedValue({
+      data: { importedCount: 2, warnings: [] },
+      error: null,
+    });
+    const client = {
+      rpc,
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      },
+      from,
+    } as any;
+    const file = {
+      name: "definitions.jsonld",
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          "@graph": [
+            {
+              "@id": "https://example.com/schemes/security",
+              "@type": "skos:ConceptScheme",
+              "rdfs:label": "Security Scheme",
+            },
+            {
+              "@id": "https://example.com/concepts/control",
+              "@type": "skos:Concept",
+              "skos:inScheme": { "@id": "https://example.com/schemes/security" },
+              "skos:prefLabel": "Control",
+              "skos:definition": "Control definition",
+            },
+            {
+              "@id": "https://example.com/concepts/access-policy",
+              "@type": "skos:Concept",
+              "skos:inScheme": { "@id": "https://example.com/schemes/security" },
+              "skos:prefLabel": "Access Policy",
+              "skos:definition": "Policy definition",
+              "skos:broader": { "@id": "https://example.com/concepts/control" },
+            },
+          ],
+        }),
+      ),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result).toMatchObject({
+      success: true,
+      imported: 2,
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(definitionInsert).toHaveBeenCalledTimes(2);
+    expect(relationshipInsert).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source_id: "definition-2",
+          target_id: "definition-1",
+          type: "related_to",
+          label: null,
+          created_by: "user-1",
+        }),
+      ]),
+    );
+  });
+
+  it("fails safely with an actionable message when search index RLS blocks the import rpc", async () => {
+    const from = vi.fn();
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: {
+          message: "new row violates row-level security policy for table \"search_documents\"",
+        },
+      }),
+      from,
+    } as any;
+    const file = {
+      name: "definitions.csv",
+      text: vi.fn().mockResolvedValue("title,description\nAccess Policy,Policy definition"),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toMatch(/search index/i);
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("fails safely with an actionable message when direct import is blocked by search index RLS", async () => {
+    const definitionSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        message: "new row violates row-level security policy for table \"search_documents\"",
+      },
+    });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const from = vi.fn((table: string) => {
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { importedCount: 1, warnings: [] },
+        error: null,
+      }),
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      },
+      from,
+    } as any;
+    const file = {
+      name: "definitions.jsonld",
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          "@graph": [
+            {
+              "@id": "https://example.com/security#AccessPolicy",
+              "rdfs:label": "Access Policy",
+              "rdfs:comment": "Policy definition",
+              "onto:namespace": "security",
+            },
+          ],
+        }),
+      ),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toMatch(/search index/i);
+    expect(definitionInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("never writes directly to search_documents in the direct persistence fallback", async () => {
+    const definitionSingle = vi.fn().mockResolvedValue({ data: { id: "definition-1" }, error: null });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      if (table === "activity_events") {
+        return { insert: activityInsert };
+      }
+
+      if (table === "search_documents") {
+        throw new Error("Direct search_documents writes are forbidden in client import flow.");
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "Could not find the function public.import_definitions_to_ontology(_ontology_id, _rows) in the schema cache" },
+      }),
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      },
+      from,
+    } as any;
+    const file = {
+      name: "definitions.csv",
+      text: vi.fn().mockResolvedValue("title,description\nAccess Policy,Policy definition"),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result.success).toBe(true);
+    expect(result.imported).toBe(1);
+    expect(from).not.toHaveBeenCalledWith("search_documents");
+  });
 });

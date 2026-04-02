@@ -5,12 +5,14 @@ import {
   fetchOntologiesForBrowsePage,
 } from "@/lib/search-entity-list-service";
 
-const searchEntities = vi.fn();
-const normalizeSearchQuery = vi.fn((query: string) => query.trim().replace(/\s+/g, " ").toLowerCase());
+const { normalizeSearchQuery, searchEntities } = vi.hoisted(() => ({
+  searchEntities: vi.fn(),
+  normalizeSearchQuery: vi.fn((query: string) => query.trim().replace(/\s+/g, " ").toLowerCase()),
+}));
 
 vi.mock("@/lib/search-service", () => ({
-  normalizeSearchQuery: (...args: unknown[]) => normalizeSearchQuery(...args),
-  searchEntities: (...args: unknown[]) => searchEntities(...args),
+  normalizeSearchQuery,
+  searchEntities,
 }));
 
 function createClientMock() {
@@ -62,7 +64,7 @@ function createClientMock() {
 
       throw new Error(`Unexpected table lookup: ${table}`);
     }),
-  } as any;
+  } as unknown as Parameters<typeof fetchDefinitionsForBrowsePage>[0];
 }
 
 describe("search-entity-list-service", () => {

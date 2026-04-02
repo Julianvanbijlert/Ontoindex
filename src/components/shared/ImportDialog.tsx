@@ -34,6 +34,7 @@ const iconByFormat: Record<string, React.ElementType> = {
   owl: FileText,
   skos: FileText,
   xmi: FileText,
+  typescript: FileText,
 };
 
 export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, onImport }: ImportDialogProps) {

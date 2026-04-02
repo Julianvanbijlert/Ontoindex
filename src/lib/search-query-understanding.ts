@@ -551,13 +551,21 @@ function buildRewriteCandidates(input: {
   addCandidate(input.query, "identity", 1);
 
   if (!searchRuntimeConfig.enableQueryRewriting) {
+    const disabledRewriteStrategies: SearchRewriteStrategy[] = [
+      "dequote",
+      "separator_normalization",
+      "path_normalization",
+      "context_follow_up",
+      "scope_marker",
+    ];
+
     return {
       rewriteCandidates: [...candidates.values()].slice(0, 1),
       rewriteConfidence: 0,
       rewriteMode: "none" as SearchRewriteMode,
       needsRewrite: false,
       rewriteGuardrails: {
-        blockedStrategies: ["dequote", "separator_normalization", "path_normalization", "context_follow_up", "scope_marker"],
+        blockedStrategies: disabledRewriteStrategies,
         maxRewriteCount: 1,
         preserveExactSemantics: true,
         contextTokenBudget: MAX_CONTEXT_QUERY_TOKENS,

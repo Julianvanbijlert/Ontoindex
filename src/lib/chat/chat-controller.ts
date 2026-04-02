@@ -28,7 +28,7 @@ function toSearchFilters(settings: ChatSessionSettings): SearchFilters {
 
 function buildGroundingConfidence(
   retrievalResponse: Awaited<ReturnType<typeof searchWithRetrievalGateway>>,
-) {
+): ChatTurnResult["retrieval"]["retrievalConfidence"] {
   if (retrievalResponse.results.length === 0) {
     return "weak" as const;
   }
@@ -75,7 +75,7 @@ export async function runGroundedChatTurn(
     maxItems: input.runtimeSettings?.maxEvidenceItems,
   });
 
-  const retrievalSummary = {
+  const retrievalSummary: ChatTurnResult["retrieval"] = {
     originalQuery: input.userMessage,
     effectiveQuery,
     normalizedQuery: retrievalResponse.analysis.normalizedQuery,

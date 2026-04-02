@@ -1,38 +1,58 @@
+import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Profile from "@/pages/Profile";
 
-const navigate = vi.fn();
-const refreshProfile = vi.fn().mockResolvedValue(undefined);
-const syncCurrentUserRole = vi.fn().mockImplementation(async (nextRole: "viewer" | "editor" | "admin") => {
-  authState.role = nextRole;
-  authState.roles = [nextRole];
-  authState.profile = {
-    ...authState.profile,
-    role: nextRole,
-  };
-});
-const updateMyRole = vi.fn();
-const toastSuccess = vi.fn();
-const toastError = vi.fn();
-
-const authState = {
-  profile: {
-    user_id: "user-1",
-    display_name: "Julia",
-    email: "julia@example.com",
-    bio: "",
-    team: "Architecture",
-    created_at: "2026-03-19T09:00:00.000Z",
-    role: "editor",
-  },
-  role: "editor",
-  roles: ["editor"],
+const {
+  authState,
+  navigate,
   refreshProfile,
   syncCurrentUserRole,
-};
+  toastError,
+  toastSuccess,
+  updateMyRole,
+} = vi.hoisted(() => {
+  const navigate = vi.fn();
+  const refreshProfile = vi.fn().mockResolvedValue(undefined);
+  const toastSuccess = vi.fn();
+  const toastError = vi.fn();
+  const updateMyRole = vi.fn();
+
+  const authState = {
+    profile: {
+      user_id: "user-1",
+      display_name: "Julia",
+      email: "julia@example.com",
+      bio: "",
+      team: "Architecture",
+      created_at: "2026-03-19T09:00:00.000Z",
+      role: "editor",
+    },
+    role: "editor",
+    roles: ["editor"],
+    refreshProfile,
+    syncCurrentUserRole: vi.fn().mockImplementation(async (nextRole: "viewer" | "editor" | "admin") => {
+      authState.role = nextRole;
+      authState.roles = [nextRole];
+      authState.profile = {
+        ...authState.profile,
+        role: nextRole,
+      };
+    }),
+  };
+
+  return {
+    authState,
+    navigate,
+    refreshProfile,
+    syncCurrentUserRole: authState.syncCurrentUserRole,
+    toastError,
+    toastSuccess,
+    updateMyRole,
+  };
+});
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -67,11 +87,10 @@ vi.mock("@/integrations/supabase/client", () => ({
 vi.mock("@/lib/role-service", () => ({
   editableRoles: ["viewer", "editor", "admin"],
   getPrimaryRole: (roles: string[]) => roles[0],
-  updateMyRole: (...args: unknown[]) => updateMyRole(...args),
+  updateMyRole,
 }));
 
 vi.mock("@/components/ui/select", () => {
-  const React = require("react");
   const SelectContext = React.createContext<(value: string) => void>(() => undefined);
 
   return {

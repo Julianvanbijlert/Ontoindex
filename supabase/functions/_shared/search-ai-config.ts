@@ -66,7 +66,15 @@ function trimOrNull(value: string | null | undefined) {
 }
 
 function getEnv(env?: EnvSource) {
-  return env || Deno.env.toObject();
+  if (env) {
+    return env;
+  }
+
+  if (typeof globalThis !== "undefined" && "Deno" in globalThis) {
+    return (globalThis as { Deno?: { env: { toObject(): EnvSource } } }).Deno?.env.toObject() || {};
+  }
+
+  return {};
 }
 
 export function getProviderApiKey(

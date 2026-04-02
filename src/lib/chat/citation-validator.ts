@@ -32,7 +32,7 @@ export function validateGroundedAnswer(
   const invalidCitations = rawCitations.filter((citationId) => !evidenceIds.has(citationId));
 
   const sanitizedText = invalidCitations.reduce(
-    (current, citationId) => current.replaceAll(`[${citationId}]`, "").replace(/\s{2,}/g, " ").trim(),
+    (current, citationId) => current.split(`[${citationId}]`).join("").replace(/\s{2,}/g, " ").trim(),
     payload.answer || "",
   );
   const grounded = validCitations.length > 0;

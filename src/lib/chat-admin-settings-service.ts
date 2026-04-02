@@ -24,6 +24,17 @@ import type {
 type AppSupabaseClient = SupabaseClient<Database>;
 type AppSettingsRow = Database["public"]["Tables"]["app_settings"]["Row"];
 type AppSettingsSecretsRow = Database["public"]["Tables"]["app_setting_secrets"]["Row"];
+type RuntimeSettingsTableRow = Pick<
+  AppSettingsRow,
+  | "chat_history_limit"
+  | "chat_llm_max_tokens"
+  | "chat_llm_temperature"
+  | "chat_max_evidence_items"
+  | "chat_runtime_max_tokens"
+  | "chat_runtime_temperature"
+  | "chat_similarity_expansion_enabled"
+  | "chat_strict_citations_default"
+>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -305,7 +316,7 @@ function mapRowsToAdminChatSettings(
 }
 
 async function loadRuntimeSettingsFromTables(client: AppSupabaseClient) {
-  const { data, error } = await client
+  const response = await client
     .from("app_settings")
     .select([
       "id",
@@ -320,6 +331,8 @@ async function loadRuntimeSettingsFromTables(client: AppSupabaseClient) {
     ].join(","))
     .eq("id", 1)
     .maybeSingle();
+  const data = response.data as unknown as RuntimeSettingsTableRow | null;
+  const error = response.error;
 
   if (error) {
     throw error;
@@ -377,7 +390,10 @@ async function loadAdminSettingsFromTables(client: AppSupabaseClient) {
     throw secretsResponse.error;
   }
 
-  return mapRowsToAdminChatSettings(settingsResponse.data, secretsResponse.data);
+  return mapRowsToAdminChatSettings(
+    settingsResponse.data as Partial<AppSettingsRow> | null,
+    secretsResponse.data as Partial<AppSettingsSecretsRow> | null,
+  );
 }
 
 async function updateAdminSettingsThroughTables(

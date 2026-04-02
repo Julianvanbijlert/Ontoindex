@@ -62,7 +62,7 @@ export default function Workflow() {
         .in("approval_request_id", requestIds)
         .order("created_at", { ascending: true });
 
-      const assignments = (assignmentsRes.data || []) as (ReviewAssignmentRecord & { approval_request_id: string })[];
+      const assignments = (assignmentsRes.data || []) as unknown as (ReviewAssignmentRecord & { approval_request_id: string })[];
       const reviewerIds = assignments.map((assignment) => assignment.reviewer_user_id).filter(Boolean) as string[];
       const profileRes = reviewerIds.length > 0
         ? await supabase.from("profiles").select("user_id, display_name, email, team").in("user_id", reviewerIds)

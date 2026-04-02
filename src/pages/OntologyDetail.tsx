@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -19,12 +19,7 @@ import { Plus, Network, Edit2, Save, X, Loader2, Upload, Download, Trash2 } from
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import {
-  ReactFlow, Background, Controls, MiniMap,
-  useNodesState, useEdgesState, type Node, type Edge, addEdge, type Connection,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { getWorkflowNodeStyle, workflowStatusConfig } from "@/lib/workflow-status";
+import { workflowStatusConfig } from "@/lib/workflow-status";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,7 +37,6 @@ import { recordEntityView } from "@/lib/history-service";
 import {
   createRelationshipRecord,
   CUSTOM_RELATION_TYPE,
-  getRelationshipDisplayLabel,
   predefinedRelationshipTypes,
 } from "@/lib/relationship-service";
 import {
@@ -53,20 +47,53 @@ import {
   canExportOntology,
   canImportOntology,
 } from "@/lib/authorization";
+import { GraphView } from "@/components/graph/GraphView";
+import { mapOntologyToGraphModel } from "@/lib/graph/mappers/ontology-to-graph";
+import type { OntologyGraphDefinition, OntologyGraphRelationship } from "@/lib/graph/mappers/ontology-to-graph";
+import type { Database, Enums } from "@/integrations/supabase/types";
+import type { RelationshipSelection } from "@/lib/relationship-service";
+
+type PriorityLevel = Enums<"priority_level">;
+type WorkflowStatus = Enums<"workflow_status">;
+
+interface OntologyRecord {
+  id: string;
+  title: string;
+  description?: string | null;
+  tags?: string[] | null;
+  status?: WorkflowStatus | null;
+  created_at: string;
+  updated_at: string;
+  view_count?: number | null;
+}
+
+interface DefinitionRecord extends OntologyGraphDefinition {
+  metadata?: Database["public"]["Tables"]["definitions"]["Row"]["metadata"];
+  version?: number | null;
+  relationships?: (OntologyGraphRelationship & {
+    target?: {
+      id?: string;
+      title?: string;
+    } | null;
+  })[] | null;
+}
+
+interface PendingGraphConnection {
+  source: string;
+  target: string;
+}
 
 export default function OntologyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user, role } = useAuth();
-  const [ontology, setOntology] = useState<any>(null);
-  const [definitions, setDefinitions] = useState<any[]>([]);
+  const [ontology, setOntology] = useState<OntologyRecord | null>(null);
+  const [definitions, setDefinitions] = useState<DefinitionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({ title: "", description: "", tags: "" });
   const [saving, setSaving] = useState(false);
   const [isFavorited, setIsFavorited] = useState(false);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [createDefOpen, setCreateDefOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -77,12 +104,25 @@ export default function OntologyDetail() {
   const [deleting, setDeleting] = useState(false);
   const [creatingGraphRelation, setCreatingGraphRelation] = useState(false);
   const [renamingGraphDefinition, setRenamingGraphDefinition] = useState(false);
-  const [pendingConnection, setPendingConnection] = useState<Connection | null>(null);
-  const [graphRelationType, setGraphRelationType] = useState<string>(predefinedRelationshipTypes[0]);
+  const [pendingConnection, setPendingConnection] = useState<PendingGraphConnection | null>(null);
+  const [graphRelationType, setGraphRelationType] = useState<RelationshipSelection>(predefinedRelationshipTypes[0]);
   const [graphCustomRelationType, setGraphCustomRelationType] = useState("");
   const [graphRenameDefinitionId, setGraphRenameDefinitionId] = useState<string | null>(null);
   const [graphRenameTitle, setGraphRenameTitle] = useState("");
-  const [newDef, setNewDef] = useState({ title: "", description: "", content: "", example: "", priority: "normal" });
+  const [graphViewMode, setGraphViewMode] = useState<"ontology" | "uml-class">("ontology");
+  const [newDef, setNewDef] = useState<{
+    title: string;
+    description: string;
+    content: string;
+    example: string;
+    priority: PriorityLevel;
+  }>({
+    title: "",
+    description: "",
+    content: "",
+    example: "",
+    priority: "normal",
+  });
   const canMutateOntology = canEditOntology(role);
   const canRemoveOntology = canDeleteOntology(role);
   const canImportDefinitions = canImportOntology(role);
@@ -106,33 +146,8 @@ export default function OntologyDetail() {
     }
     setIsFavorited(!!favRes.data);
 
-    const defs = defsRes.data || [];
+    const defs = (defsRes.data || []) as DefinitionRecord[];
     setDefinitions(defs);
-
-    const graphEdges: Edge[] = [];
-    defs.forEach((d: any) => {
-      (d.relationships || []).forEach((r: any) => {
-        graphEdges.push({
-          id: r.id, source: r.source_id, target: r.target_id,
-          label: getRelationshipDisplayLabel(r.type, r.label),
-          style: { stroke: "hsl(var(--primary))" },
-          labelStyle: { fontSize: 11, fill: "hsl(var(--muted-foreground))" },
-        });
-      });
-    });
-
-    const graphNodes: Node[] = defs.map((d: any, i: number) => ({
-      id: d.id,
-      position: { x: 150 + (i % 4) * 220, y: 80 + Math.floor(i / 4) * 150 },
-      data: { label: d.title },
-      style: {
-        ...getWorkflowNodeStyle(d.status || "draft"),
-        borderRadius: "8px", padding: "12px 16px", fontSize: "13px",
-        fontWeight: 500,
-      },
-    }));
-    setNodes(graphNodes);
-    setEdges(graphEdges);
     setLoading(false);
   };
 
@@ -168,6 +183,16 @@ export default function OntologyDetail() {
       entityTitle: ontology.title,
     }).catch(() => undefined);
   }, [ontology?.id, ontology?.title, user?.id]);
+
+  const graphModel = useMemo(
+    () =>
+      mapOntologyToGraphModel({
+        ontologyId: ontology?.id,
+        definitions,
+        preferredKind: graphViewMode,
+      }),
+    [definitions, graphViewMode, ontology?.id],
+  );
 
   const handleSaveOntology = async () => {
     if (!canMutateOntology) { toast.error("Your current role is read-only."); return; }
@@ -206,8 +231,8 @@ export default function OntologyDetail() {
     const { data, error } = await supabase.from("definitions").insert({
       title: newDef.title.trim(), description: newDef.description.trim(),
       content: newDef.content.trim(), example: newDef.example.trim(),
-      ontology_id: id, priority: newDef.priority as any,
-      created_by: user?.id, status: "draft" as any,
+      ontology_id: id, priority: newDef.priority,
+      created_by: user?.id, status: "draft" satisfies WorkflowStatus,
     }).select().single();
     if (error) toast.error(error.message);
     else {
@@ -244,7 +269,7 @@ export default function OntologyDetail() {
     setDeleteOpen(false);
   };
 
-  const handleGraphConnect = (connection: Connection) => {
+  const handleGraphConnect = (connection: PendingGraphConnection) => {
     if (!canMutateGraph || !connection.source || !connection.target) {
       return;
     }
@@ -265,23 +290,10 @@ export default function OntologyDetail() {
       const data = await createRelationshipRecord(supabase, {
         sourceId: pendingConnection.source,
         targetId: pendingConnection.target,
-        selectedType: graphRelationType as any,
+        selectedType: graphRelationType,
         customType: graphCustomRelationType,
         createdBy: user.id,
       });
-      setEdges((current) =>
-        addEdge(
-          {
-            id: data.id,
-            source: pendingConnection.source!,
-            target: pendingConnection.target!,
-            label: getRelationshipDisplayLabel(data.type, data.label),
-            style: { stroke: "hsl(var(--primary))" },
-            labelStyle: { fontSize: 11, fill: "hsl(var(--muted-foreground))" },
-          },
-          current,
-        ),
-      );
       toast.success("Relationship created");
       emitAppDataChanged({ entityType: "relationship", action: "created", entityId: data.id });
       fetchAll();
@@ -453,7 +465,7 @@ export default function OntologyDetail() {
                   <div className="space-y-2"><Label>Example</Label><Textarea placeholder="Usage example" rows={3} value={newDef.example} onChange={e => setNewDef(p => ({ ...p, example: e.target.value }))} /></div>
                   <div className="space-y-2">
                     <Label>Priority</Label>
-                    <Select value={newDef.priority} onValueChange={v => setNewDef(p => ({ ...p, priority: v }))}>
+                    <Select value={newDef.priority} onValueChange={v => setNewDef(p => ({ ...p, priority: v as PriorityLevel }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="low">Low</SelectItem>
@@ -481,7 +493,7 @@ export default function OntologyDetail() {
                       <p className="text-sm text-muted-foreground truncate">{d.description || "No description"}</p>
                       {(d.relationships || []).length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1">
-                          {d.relationships.slice(0, 2).map((relationship: any) => (
+                          {d.relationships.slice(0, 2).map((relationship) => (
                             <Badge key={relationship.id} variant="outline" className="text-[10px]">
                               {relationship.target?.title || "Unknown definition"}
                             </Badge>
@@ -504,6 +516,27 @@ export default function OntologyDetail() {
         <TabsContent value="graph" className="mt-0">
           <Card className="border-border/50 sticky top-20">
             <CardContent className="space-y-4 p-4">
+              {definitions.length > 0 ? (
+                <div className="flex items-center justify-end gap-2">
+                  <span className="text-xs text-muted-foreground">View mode</span>
+                  <Button
+                    type="button"
+                    variant={graphViewMode === "ontology" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setGraphViewMode("ontology")}
+                  >
+                    Ontology
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={graphViewMode === "uml-class" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setGraphViewMode("uml-class")}
+                  >
+                    UML
+                  </Button>
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 {Object.entries(workflowStatusConfig).map(([status, meta]) => (
                   <Badge key={status} variant="outline" className={meta.badgeClass}>
@@ -521,29 +554,18 @@ export default function OntologyDetail() {
                 </p>
               )}
               <div style={{ height: 450 }}>
-                {nodes.length === 0 ? (
+                {graphModel.nodes.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                     <div className="text-center"><Network className="h-8 w-8 mx-auto mb-2 opacity-50" /><p>No definitions to graph</p></div>
                   </div>
                 ) : (
-                  <ReactFlow
-                    nodes={nodes}
-                    edges={edges}
-                    onNodesChange={onNodesChange}
-                    onEdgesChange={onEdgesChange}
-                    onConnect={canMutateGraph ? handleGraphConnect : undefined}
-                    onNodeDoubleClick={canMutateGraph ? (_, node) => openGraphRenameDialog(node.id) : undefined}
-                    nodesDraggable={canMutateGraph}
-                    nodesConnectable={canMutateGraph}
-                    elementsSelectable={canMutateGraph}
-                    edgesFocusable={canMutateGraph}
-                    fitView
-                    style={{ background: "hsl(var(--background))" }}
-                  >
-                    <Background color="hsl(var(--border))" gap={20} />
-                    <Controls />
-                    <MiniMap style={{ background: "hsl(var(--card))" }} />
-                  </ReactFlow>
+                  <GraphView
+                    model={graphModel}
+                    readOnly={!canMutateGraph}
+                    onCreateEdge={handleGraphConnect}
+                    onNodeDoubleClick={openGraphRenameDialog}
+                    className="h-full"
+                  />
                 )}
               </div>
             </CardContent>
@@ -605,7 +627,7 @@ export default function OntologyDetail() {
             </div>
             <div className="space-y-2">
               <Label>Relationship type</Label>
-              <Select value={graphRelationType} onValueChange={setGraphRelationType}>
+              <Select value={graphRelationType} onValueChange={(value) => setGraphRelationType(value as RelationshipSelection)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {predefinedRelationshipTypes.map((type) => (

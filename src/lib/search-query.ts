@@ -20,7 +20,6 @@ export {
 export type {
   RetrievalPlan,
   SearchDenseRetrievalGate,
-  SearchRewriteMode,
 } from "@/lib/search-query-planning";
 
 import type { SearchConfidence, SearchQueryAnalysis } from "@/lib/search-query-understanding";

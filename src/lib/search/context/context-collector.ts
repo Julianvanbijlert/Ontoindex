@@ -133,7 +133,7 @@ function buildUserContext(input: SearchContextCollectorInput): SearchUserContext
   };
 }
 
-function buildRetrievalPlan(context: Omit<SearchContext, "contextHash" | "debug">) {
+function buildRetrievalPlan(context: SearchContext) {
   const activeQuery = context.session.activeQuery || "";
   const normalizedQuery = normalizeSearchQuery(activeQuery);
 
@@ -293,7 +293,7 @@ export function collectSearchContext(input: SearchContextCollectorInput): Collec
   const scope = buildScopeContext(input);
   const session = buildSessionContext(input);
   const user = buildUserContext(input);
-  const provisionalContext = {
+  const provisionalContext: SearchContext = {
     scope,
     session,
     user,
@@ -304,6 +304,15 @@ export function collectSearchContext(input: SearchContextCollectorInput): Collec
       rewriteMode: "none" as const,
       denseRetrievalGate: "off" as const,
       ambiguityFlags: [],
+    },
+    contextHash: "ctx_pending",
+    debug: {
+      sourceCounts: {
+        recentQueryCount: session.recentQueries.length,
+        recentEntityCount: session.recentEntities.length,
+      },
+      hasScopeContext: false,
+      hasUserPreferences: false,
     },
   };
   const retrievalPlan = buildRetrievalPlan(provisionalContext);

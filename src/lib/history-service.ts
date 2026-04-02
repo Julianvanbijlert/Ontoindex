@@ -36,7 +36,7 @@ interface LogActivityEventInput {
   details?: Json | null;
 }
 
-function summarizeActivity(event: ActivityEventRow) {
+function summarizeActivity(event: Pick<ActivityEventRow, "action" | "details" | "entity_title">) {
   const details = (event.details || {}) as Record<string, unknown>;
   const explicitSummary = typeof details.summary === "string" ? details.summary : null;
 

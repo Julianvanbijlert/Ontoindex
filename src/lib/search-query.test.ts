@@ -9,9 +9,20 @@ import {
 } from "@/lib/search-query-understanding";
 import type { SearchContext } from "@/lib/search/context/types";
 
-function createSearchContext(overrides: Partial<SearchContext> = {}): SearchContext {
-  const overrideUser = overrides.user || {};
-  const overridePreferences = overrideUser.preferences || {};
+interface SearchContextOverrides {
+  scope?: Partial<SearchContext["scope"]>;
+  session?: Partial<SearchContext["session"]>;
+  user?: Partial<Omit<SearchContext["user"], "preferences">> & {
+    preferences?: Partial<SearchContext["user"]["preferences"]>;
+  };
+  retrievalPlan?: Partial<SearchContext["retrievalPlan"]>;
+  debug?: Partial<SearchContext["debug"]>;
+  contextHash?: string;
+}
+
+function createSearchContext(overrides: SearchContextOverrides = {}): SearchContext {
+  const overrideUser = overrides.user ?? {};
+  const overridePreferences = overrideUser.preferences ?? {};
   const { preferences: _ignoredPreferences, ...overrideUserWithoutPreferences } = overrideUser;
 
   return {

@@ -1,22 +1,33 @@
+import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import SearchPage from "@/pages/SearchPage";
 
-const authState = {
-  user: { id: "user-1" },
-  session: null,
-  profile: null,
-  role: "viewer",
-};
-
-const navigate = vi.fn();
-const fetchRecentFinds = vi.fn();
-const fetchSearchOptions = vi.fn();
-const fetchSearchHistory = vi.fn();
-const filterSearchHistory = vi.fn();
-const saveSearchHistory = vi.fn();
-const searchEntitiesWithMeta = vi.fn();
+const {
+  authState,
+  fetchRecentFinds,
+  fetchSearchHistory,
+  fetchSearchOptions,
+  filterSearchHistory,
+  navigate,
+  saveSearchHistory,
+  searchEntitiesWithMeta,
+} = vi.hoisted(() => ({
+  authState: {
+    user: { id: "user-1" },
+    session: null,
+    profile: null,
+    role: "viewer",
+  },
+  navigate: vi.fn(),
+  fetchRecentFinds: vi.fn(),
+  fetchSearchOptions: vi.fn(),
+  fetchSearchHistory: vi.fn(),
+  filterSearchHistory: vi.fn(),
+  saveSearchHistory: vi.fn(),
+  searchEntitiesWithMeta: vi.fn(),
+}));
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -43,16 +54,15 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 vi.mock("@/lib/search-service", () => ({
-  fetchSearchOptions: (...args: unknown[]) => fetchSearchOptions(...args),
-  fetchRecentFinds: (...args: unknown[]) => fetchRecentFinds(...args),
-  fetchSearchHistory: (...args: unknown[]) => fetchSearchHistory(...args),
-  filterSearchHistory: (...args: unknown[]) => filterSearchHistory(...args),
-  saveSearchHistory: (...args: unknown[]) => saveSearchHistory(...args),
-  searchEntitiesWithMeta: (...args: unknown[]) => searchEntitiesWithMeta(...args),
+  fetchSearchOptions,
+  fetchRecentFinds,
+  fetchSearchHistory,
+  filterSearchHistory,
+  saveSearchHistory,
+  searchEntitiesWithMeta,
 }));
 
 vi.mock("@/components/ui/select", () => {
-  const React = require("react");
   const SelectContext = React.createContext<(value: string) => void>(() => undefined);
 
   return {

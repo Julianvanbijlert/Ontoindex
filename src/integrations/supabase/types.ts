@@ -658,6 +658,51 @@ export type Database = {
           },
         ]
       }
+      graph_node_positions: {
+        Row: {
+          graph_key: string
+          node_id: string
+          updated_at: string
+          x: number
+          y: number
+        }
+        Insert: {
+          graph_key: string
+          node_id: string
+          updated_at?: string
+          x: number
+          y: number
+        }
+        Update: {
+          graph_key?: string
+          node_id?: string
+          updated_at?: string
+          x?: number
+          y?: number
+        }
+        Relationships: []
+      }
+      graph_renderer_preferences: {
+        Row: {
+          renderer_id: string
+          scope: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          renderer_id: string
+          scope: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          renderer_id?: string
+          scope?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       folders: {
         Row: {
           created_at: string

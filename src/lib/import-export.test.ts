@@ -24,6 +24,12 @@ const snapshot: OntologyExportSnapshot = {
       tags: ["security"],
       updatedAt: "2026-03-19T12:00:00.000Z",
       viewCount: 5,
+      metadata: {
+        iri: "https://example.com/security#AccessPolicy",
+        namespace: "security",
+        section: "governance",
+        group: "policies",
+      },
       relationships: [
         {
           id: "rel-1",
@@ -45,6 +51,66 @@ const snapshot: OntologyExportSnapshot = {
       tags: ["controls"],
       updatedAt: "2026-03-19T12:30:00.000Z",
       viewCount: 7,
+      metadata: {
+        iri: "https://example.com/security#ControlSet",
+        namespace: "security",
+      },
+      relationships: [],
+    },
+  ],
+};
+
+const semanticSnapshot: OntologyExportSnapshot = {
+  ontology: {
+    id: "onto-1",
+    title: "Security Ontology",
+    description: "Security concepts",
+    status: "approved",
+    tags: ["security"],
+    updatedAt: "2026-03-19T12:00:00.000Z",
+  },
+  definitions: [
+    {
+      id: "def-1",
+      title: "Access Policy",
+      description: "Policy definition",
+      content: "Used to govern access",
+      example: "Example",
+      status: "approved",
+      priority: "normal",
+      tags: ["security"],
+      updatedAt: "2026-03-19T12:00:00.000Z",
+      viewCount: 5,
+      metadata: {
+        iri: "https://example.com/security#AccessPolicy",
+        namespace: "security",
+        section: "governance",
+        group: "policies",
+      },
+      relationships: [
+        {
+          id: "rel-1",
+          type: "is_a",
+          targetId: "def-2",
+          targetTitle: "Control Set",
+        },
+      ],
+    },
+    {
+      id: "def-2",
+      title: "Control Set",
+      description: "Controls",
+      content: "",
+      example: "",
+      status: "draft",
+      priority: "high",
+      tags: ["controls"],
+      updatedAt: "2026-03-19T12:30:00.000Z",
+      viewCount: 7,
+      metadata: {
+        iri: "https://example.com/security#ControlSet",
+        namespace: "security",
+      },
       relationships: [],
     },
   ],
@@ -131,6 +197,59 @@ describe("ExportFactory", () => {
 
     expect(String(result.data)).toContain("<rdf:RDF");
     expect(result.filename.endsWith(".rdf")).toBe(true);
+  });
+
+  it("exports JSON-LD from canonical concept data with preserved IRIs and concept-scheme structure", async () => {
+    const result = await ExportFactory.create("jsonld").export(semanticSnapshot);
+    const payload = JSON.parse(String(result.data));
+    const graph = payload["@graph"] as Array<Record<string, unknown>>;
+
+    expect(graph).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          "@id": "https://ontologyhub.local/ontologies/onto-1",
+          "@type": "skos:ConceptScheme",
+        }),
+        expect.objectContaining({
+          "@id": "https://example.com/security#AccessPolicy",
+          "@type": "skos:Concept",
+          "skos:prefLabel": "Access Policy",
+          "skos:definition": "Policy definition",
+          "skos:inScheme": { "@id": "https://ontologyhub.local/ontologies/onto-1" },
+          "skos:broader": [{ "@id": "https://example.com/security#ControlSet" }],
+          "onto:namespace": "security",
+          "onto:section": "governance",
+          "onto:group": "policies",
+        }),
+      ]),
+    );
+    expect(String(result.data)).not.toContain("https://ontologyhub.local/ontologies/onto-1/definitions/def-1");
+  });
+
+  it("exports N-Triples with canonical concept IRIs and standards-aligned predicates", async () => {
+    const result = await ExportFactory.create("ntriples").export(semanticSnapshot);
+    const data = String(result.data);
+
+    expect(data).toContain(
+      '<https://example.com/security#AccessPolicy> <http://www.w3.org/2004/02/skos/core#broader> <https://example.com/security#ControlSet> .',
+    );
+    expect(data).toContain(
+      '<https://example.com/security#AccessPolicy> <http://www.w3.org/2004/02/skos/core#inScheme> <https://ontologyhub.local/ontologies/onto-1> .',
+    );
+    expect(data).not.toContain("https://ontologyhub.local/ontologies/onto-1/definitions/def-1");
+  });
+
+  it("exports SKOS with preserved concept metadata and scheme membership", async () => {
+    const result = await ExportFactory.create("skos").export(semanticSnapshot);
+    const data = String(result.data);
+
+    expect(data).toContain("<https://ontologyhub.local/ontologies/onto-1>");
+    expect(data).toContain("a skos:ConceptScheme");
+    expect(data).toContain('<https://example.com/security#AccessPolicy>');
+    expect(data).toContain('a skos:Concept');
+    expect(data).toContain('skos:broader <https://example.com/security#ControlSet>');
+    expect(data).toContain('skos:inScheme <https://ontologyhub.local/ontologies/onto-1>');
+    expect(data).toContain('onto:namespace "security" ;');
   });
 
   it("round-trips every supported export format back through the matching importer", async () => {

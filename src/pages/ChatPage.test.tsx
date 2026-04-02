@@ -3,28 +3,31 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatEdgeFunctionError } from "@/lib/chat/chat-api";
-import ChatPage from "@/pages/ChatPage";
 
-const sendChatTurnMock = vi.fn();
+const { sendChatTurnMock } = vi.hoisted(() => ({
+  sendChatTurnMock: vi.fn(),
+}));
+
+const authState = {
+  user: {
+    id: "user-1",
+    user_metadata: {},
+  },
+  role: "editor",
+  profile: {
+    view_preference: "medium",
+    format_preference: "grid",
+    sort_preference: "asc",
+    group_by_preference: "name",
+  },
+  session: {
+    access_token: "token",
+    expires_at: 123,
+  },
+};
 
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({
-    user: {
-      id: "user-1",
-      user_metadata: {},
-    },
-    role: "editor",
-    profile: {
-      view_preference: "medium",
-      format_preference: "grid",
-      sort_preference: "asc",
-      group_by_preference: "name",
-    },
-    session: {
-      access_token: "token",
-      expires_at: 123,
-    },
-  }),
+  useAuth: () => authState,
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
@@ -79,10 +82,51 @@ vi.mock("@/lib/search-service", () => ({
   fetchRecentFinds: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@/components/shared/MarkdownRenderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
+}));
+
+vi.mock("@/components/shared/EmptyState", () => ({
+  EmptyState: ({ title, description }: { title: string; description: string }) => (
+    <div>
+      <div>{title}</div>
+      <div>{description}</div>
+    </div>
+  ),
+}));
+
+vi.mock("@/components/ui/select", () => {
+  return {
+    Select: ({ children }: any) => <div>{children}</div>,
+    SelectTrigger: ({ children }: any) => <button type="button">{children}</button>,
+    SelectValue: ({ placeholder }: { placeholder?: string }) => <span>{placeholder ?? "Selected"}</span>,
+    SelectContent: ({ children }: any) => <div>{children}</div>,
+    SelectItem: ({ children }: any) => <div>{children}</div>,
+  };
+});
+
+vi.mock("@/components/ui/switch", () => ({
+  Switch: ({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (value: boolean) => void }) => (
+    <button type="button" role="switch" aria-checked={checked} onClick={() => onCheckedChange(!checked)}>
+      {checked ? "On" : "Off"}
+    </button>
+  ),
+}));
+
 describe("ChatPage", () => {
   beforeEach(() => {
     sendChatTurnMock.mockReset();
   });
+
+  async function renderChatPage() {
+    const { default: ChatPage } = await import("@/pages/ChatPage");
+
+    return render(
+      <MemoryRouter>
+        <ChatPage />
+      </MemoryRouter>,
+    );
+  }
 
   it("renders and sends a grounded chat turn", async () => {
     sendChatTurnMock.mockResolvedValue({
@@ -114,11 +158,7 @@ describe("ChatPage", () => {
       groundingStatus: "grounded",
     });
 
-    render(
-      <MemoryRouter>
-        <ChatPage />
-      </MemoryRouter>,
-    );
+    await renderChatPage();
 
     expect(await screen.findByText("Grounded Chat")).toBeInTheDocument();
 
@@ -140,11 +180,7 @@ describe("ChatPage", () => {
       new ChatEdgeFunctionError("Chat provider chain failed: missing Gemini key", "provider_config_missing", "req-123", 503),
     );
 
-    render(
-      <MemoryRouter>
-        <ChatPage />
-      </MemoryRouter>,
-    );
+    await renderChatPage();
 
     expect(await screen.findByText("Grounded Chat")).toBeInTheDocument();
 

@@ -132,7 +132,11 @@ export default function Definitions() {
                   onToggle={liked => {
                     setFavorites(prev => {
                       const n = new Set(prev);
-                      liked ? n.add(d.id) : n.delete(d.id);
+                      if (liked) {
+                        n.add(d.id);
+                      } else {
+                        n.delete(d.id);
+                      }
                       return n;
                     });
                   }}

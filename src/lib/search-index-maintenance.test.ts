@@ -84,6 +84,20 @@ describe("search-index-maintenance", () => {
     });
   });
 
+  it("rejects untrusted syncEntity calls when the backend reports search_documents RLS", async () => {
+    const { client, rpc } = createAdminClientMock();
+    rpc.mockResolvedValue({
+      data: null,
+      error: {
+        message: "new row violates row-level security policy for table \"search_documents\"",
+      },
+    });
+
+    await expect(syncEntity(client, "def-unauthorized")).rejects.toMatchObject({
+      message: expect.stringContaining("search_documents"),
+    });
+  });
+
   it("claims queued stale documents, writes embeddings, and completes the job", async () => {
     const { client, rpc, from, update, eq } = createAdminClientMock();
     const embeddingProvider = createEmbeddingProviderMock();

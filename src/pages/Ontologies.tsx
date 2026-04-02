@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 import { canEditOntology } from "@/lib/authorization";
 import { fetchOntologiesForBrowsePage, type OntologyListItem } from "@/lib/search-entity-list-service";
+import { normalizeSearchSyncErrorMessage } from "@/lib/search-index-errors";
 
 export default function Ontologies() {
   const { user, role } = useAuth();
@@ -57,7 +58,11 @@ export default function Ontologies() {
       title: newOnto.title.trim(), description: newOnto.description.trim(),
       tags, created_by: user?.id, status: "draft" as any,
     }).select().single();
-    if (error) toast.error(error.message);
+    if (error) {
+      toast.error(
+        normalizeSearchSyncErrorMessage(error, "Ontology creation", "Unable to create ontology."),
+      );
+    }
     else {
       await supabase.from("activity_events").insert({
         user_id: user?.id, action: "created", entity_type: "ontology", entity_id: data.id, entity_title: data.title,

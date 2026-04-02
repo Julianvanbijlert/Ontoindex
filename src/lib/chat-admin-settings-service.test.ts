@@ -10,7 +10,11 @@ function createClientMock() {
   return {
     rpc: vi.fn(),
     from: vi.fn(),
-  } as any;
+  };
+}
+
+function asChatSettingsClient(client: ReturnType<typeof createClientMock>) {
+  return client as unknown as Parameters<typeof fetchChatRuntimeSettings>[0];
 }
 
 describe("chat-admin-settings-service", () => {
@@ -43,7 +47,7 @@ describe("chat-admin-settings-service", () => {
       error: null,
     });
 
-    const settings = await fetchChatRuntimeSettings(client);
+    const settings = await fetchChatRuntimeSettings(asChatSettingsClient(client));
 
     expect(settings).toMatchObject({
       enableSimilarityExpansion: false,
@@ -84,14 +88,14 @@ describe("chat-admin-settings-service", () => {
       error: null,
     });
 
-    const settings = await fetchAdminChatSettings(client);
+    const settings = await fetchAdminChatSettings(asChatSettingsClient(client));
 
     expect(settings.provider.llmProvider).toBe("gemini");
     expect(settings.provider.apiKeyConfigured).toBe(true);
     expect(settings.provider.apiKeyMasked).toBe("Configured");
     expect(settings.embeddings.embeddingProvider).toBe("gemini");
     expect(settings.providerKeys.gemini.configured).toBe(true);
-    expect((settings.provider as Record<string, unknown>).llmApiKey).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(settings.provider, "llmApiKey")).toBe(false);
   });
 
   it("falls back to direct table reads when the admin settings rpc is unavailable", async () => {
@@ -163,7 +167,7 @@ describe("chat-admin-settings-service", () => {
       throw new Error(`Unexpected table ${table}`);
     });
 
-    const settings = await fetchAdminChatSettings(client);
+    const settings = await fetchAdminChatSettings(asChatSettingsClient(client));
 
     expect(settings.provider.llmProvider).toBe("openai");
     expect(settings.provider.apiKeyConfigured).toBe(true);
@@ -189,14 +193,14 @@ describe("chat-admin-settings-service", () => {
             data: null,
             error: {
               code: "42P01",
-              message: `relation \"public.${table}\" does not exist`,
+              message: `relation "public.${table}" does not exist`,
             },
           }),
         })),
       })),
     }));
 
-    const settings = await fetchAdminChatSettings(client);
+    const settings = await fetchAdminChatSettings(asChatSettingsClient(client));
 
     expect(settings.provider.llmProvider).toBe("gemini");
     expect(settings.provider.llmModel).toBe("gemini-2.0-flash");
@@ -215,7 +219,7 @@ describe("chat-admin-settings-service", () => {
       },
     });
 
-    await expect(updateAdminChatSettings(client, {
+    await expect(updateAdminChatSettings(asChatSettingsClient(client), {
       provider: {
         llmProvider: "deepseek",
         llmModel: "deepseek-chat",
@@ -265,7 +269,7 @@ describe("chat-admin-settings-service", () => {
       error: null,
     });
 
-    await updateAdminChatSettings(client, {
+    await updateAdminChatSettings(asChatSettingsClient(client), {
       provider: {
         llmProvider: "OPENAI",
         llmModel: "   ",
@@ -356,7 +360,7 @@ describe("chat-admin-settings-service", () => {
       error: null,
     });
 
-    await updateAdminChatSettings(client, {
+    await updateAdminChatSettings(asChatSettingsClient(client), {
       provider: {
         llmProvider: "DEEPSEEK",
         llmModel: "deepseek-reasoner",

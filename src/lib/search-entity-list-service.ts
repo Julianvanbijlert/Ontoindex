@@ -97,7 +97,7 @@ export async function fetchDefinitionsForBrowsePage(
       throw error;
     }
 
-    return (data || []) as DefinitionListItem[];
+    return (data || []) as unknown as DefinitionListItem[];
   }
 
   const filters: SearchFilters = {
@@ -134,7 +134,7 @@ export async function fetchDefinitionsForBrowsePage(
     throw error;
   }
 
-  return orderRecordsByIds(definitionIds, (data || []) as DefinitionListItem[]);
+  return orderRecordsByIds(definitionIds, (data || []) as unknown as DefinitionListItem[]);
 }
 
 export async function fetchOntologiesForBrowsePage(

@@ -3,14 +3,25 @@ import { describe, expect, it, vi } from "vitest";
 
 import Notifications from "@/pages/Notifications";
 
-const fetchNotifications = vi.fn();
-const fetchUnreadNotificationCount = vi.fn();
-const markNotificationRead = vi.fn();
-const markNotificationUnread = vi.fn();
-const markAllNotificationsRead = vi.fn();
-const fetchNotificationPreferences = vi.fn();
-const updateNotificationPreference = vi.fn();
-const navigate = vi.fn();
+const {
+  fetchNotifications,
+  fetchNotificationPreferences,
+  fetchUnreadNotificationCount,
+  markAllNotificationsRead,
+  markNotificationRead,
+  markNotificationUnread,
+  navigate,
+  updateNotificationPreference,
+} = vi.hoisted(() => ({
+  fetchNotifications: vi.fn(),
+  fetchUnreadNotificationCount: vi.fn(),
+  markNotificationRead: vi.fn(),
+  markNotificationUnread: vi.fn(),
+  markAllNotificationsRead: vi.fn(),
+  fetchNotificationPreferences: vi.fn(),
+  updateNotificationPreference: vi.fn(),
+  navigate: vi.fn(),
+}));
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
