@@ -128,6 +128,60 @@ describe("ImportFactory", () => {
     });
   });
 
+  it("parses structured relationship metadata from tabular imports", async () => {
+    const metadataJson = JSON.stringify([
+      {
+        targetRef: "Control Set",
+        type: "related_to",
+        label: "broader",
+        metadata: {
+          standards: {
+            relation: {
+              kind: "broader",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+              attributes: [
+                {
+                  id: "rel-attr-strength",
+                  name: "strength",
+                  datatypeId: "xsd:decimal",
+                },
+              ],
+            },
+          },
+        },
+      },
+    ]).replace(/"/g, '""');
+    const file = {
+      name: "definitions.csv",
+      text: async () =>
+        [
+          "id,title,description,related_relationships_metadata",
+          `def-1,Access Policy,Policy definition,"${metadataJson}"`,
+          "def-2,Control Set,Control definition,",
+        ].join("\n"),
+    } as unknown as File;
+
+    const bundle = await ImportFactory.createFromFile(file).parse(file);
+
+    expect(bundle.relationships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceRef: "def-1",
+          targetRef: "Control Set",
+          type: "related_to",
+          metadata: expect.objectContaining({
+            standards: expect.objectContaining({
+              relation: expect.objectContaining({
+                kind: "broader",
+                predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+              }),
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("preserves layout-relevant ontology metadata from semantic imports", async () => {
     const file = {
       name: "ontology.jsonld",

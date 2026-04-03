@@ -46,6 +46,29 @@ describe("graphModelToMermaid", () => {
           kind: "extends",
           label: "inherits",
         },
+        {
+          id: "assoc-1",
+          source: "person",
+          target: "employee",
+          kind: "association",
+          label: "manages",
+          semantic: {
+            umlAssociation: true,
+          },
+          properties: {
+            sourceRole: "manager",
+            targetRole: "staffMember",
+            sourceCardinality: "1",
+            targetCardinality: "0..*",
+            associationAttributes: [
+              {
+                id: "assoc-attr-priority",
+                name: "priority",
+                datatypeId: "string",
+              },
+            ],
+          },
+        },
       ],
     };
 
@@ -57,6 +80,9 @@ describe("graphModelToMermaid", () => {
     expect(diagram).toContain("+activate() void");
     expect(diagram).toContain('class Employee["Employee"] {');
     expect(diagram).toContain("Person <|-- Employee : inherits");
+    expect(diagram).toContain(
+      "Person --> Employee : manages [sourceRole=manager, targetRole=staffMember, sourceCardinality=1, targetCardinality=0..*, attributes=priority]",
+    );
   });
 
   it("maps an ER graph into Mermaid ER syntax with cardinalities", () => {

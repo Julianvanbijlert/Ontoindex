@@ -417,6 +417,18 @@ function buildUmlAssociationEdges(model: StandardsModel) {
         ...(association.target.role ? { targetRole: association.target.role } : {}),
         ...(association.source.cardinality ? { sourceCardinality: association.source.cardinality } : {}),
         ...(association.target.cardinality ? { targetCardinality: association.target.cardinality } : {}),
+        ...(association.attributes && association.attributes.length > 0
+          ? {
+              associationAttributes: association.attributes.map((attribute) => ({
+                id: attribute.id,
+                name: attribute.name,
+                ...(attribute.label ? { label: attribute.label } : {}),
+                ...(attribute.datatypeId ? { datatypeId: attribute.datatypeId } : {}),
+                ...(attribute.cardinality ? { cardinality: attribute.cardinality } : {}),
+                ...(attribute.definition ? { definition: attribute.definition } : {}),
+              })),
+            }
+          : {}),
       },
     } satisfies GraphEdge));
 }

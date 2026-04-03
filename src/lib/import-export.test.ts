@@ -3,6 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { ExportFactory, fetchOntologyExportSnapshot, type OntologyExportSnapshot } from "@/lib/import-export";
 import { ImportFactory } from "@/lib/import-factory";
 
+const fetchStandardsRuntimeSettings = vi.fn().mockResolvedValue({
+  enabledStandards: ["mim", "nl-sbb", "rdf"],
+  ruleOverrides: {},
+});
+
+vi.mock("@/lib/standards/settings-service", () => ({
+  fetchStandardsRuntimeSettings: (...args: unknown[]) => fetchStandardsRuntimeSettings(...args),
+  createDefaultStandardsSettings: () => ({
+    enabledStandards: ["mim", "nl-sbb", "rdf"],
+    ruleOverrides: {},
+  }),
+}));
+
 const snapshot: OntologyExportSnapshot = {
   ontology: {
     id: "onto-1",
@@ -116,6 +129,101 @@ const semanticSnapshot: OntologyExportSnapshot = {
   ],
 };
 
+const structuredMetadataSnapshot: OntologyExportSnapshot = {
+  ontology: {
+    id: "onto-structured",
+    title: "Structured Ontology",
+    description: "Structured metadata",
+    status: "draft",
+    tags: [],
+    updatedAt: "2026-03-20T10:00:00.000Z",
+  },
+  definitions: [
+    {
+      id: "def-source",
+      title: "Source",
+      description: "Source definition",
+      content: "",
+      example: "",
+      status: "draft",
+      priority: "normal",
+      tags: [],
+      updatedAt: "2026-03-20T10:00:00.000Z",
+      viewCount: 0,
+      metadata: {
+        iri: "https://example.com/model#Source",
+        standards: {
+          class: {
+            attributes: [
+              {
+                id: "attr-code",
+                name: "code",
+                datatypeId: "string",
+              },
+            ],
+          },
+        },
+      },
+      relationships: [
+        {
+          id: "rel-structured",
+          type: "related_to",
+          label: "broader",
+          targetId: "def-target",
+          targetTitle: "Target",
+          metadata: {
+            standards: {
+              relation: {
+                kind: "broader",
+                predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+                predicateKey: "broader",
+                attributes: [
+                  {
+                    id: "rel-attr-strength",
+                    name: "strength",
+                    datatypeId: "xsd:decimal",
+                  },
+                ],
+              },
+              association: {
+                sourceRole: "parent",
+                targetRole: "child",
+                sourceCardinality: "0..*",
+                targetCardinality: "1",
+                attributes: [
+                  {
+                    id: "assoc-attr-evidence",
+                    name: "evidenceLevel",
+                    datatypeId: "string",
+                  },
+                ],
+              },
+            },
+          },
+        } as any,
+      ],
+    },
+    {
+      id: "def-target",
+      title: "Target",
+      description: "Target definition",
+      content: "",
+      example: "",
+      status: "draft",
+      priority: "normal",
+      tags: [],
+      updatedAt: "2026-03-20T10:00:00.000Z",
+      viewCount: 0,
+      metadata: {
+        iri: "https://example.com/model#Target",
+      },
+      relationships: [],
+    },
+  ],
+};
+
+const exportClient = { __brand: "export-client" } as any;
+
 function createImportFile(data: string | Blob, filename: string) {
   return {
     name: filename,
@@ -170,7 +278,7 @@ describe("ExportFactory", () => {
 
   it("returns correctly typed export artifacts for every supported format", async () => {
     for (const exporter of ExportFactory.getAll()) {
-      const result = await exporter.export(snapshot);
+      const result = await exporter.export(snapshot, exportClient);
 
       expect(result.success).toBe(true);
       expect(result.filename.endsWith(`.${exporter.extension}`)).toBe(true);
@@ -186,21 +294,21 @@ describe("ExportFactory", () => {
   });
 
   it("produces JSON-LD output with an @graph payload", async () => {
-    const result = await ExportFactory.create("jsonld").export(snapshot);
+    const result = await ExportFactory.create("jsonld").export(snapshot, exportClient);
 
     expect(String(result.data)).toContain('"@graph"');
     expect(result.filename.endsWith(".jsonld")).toBe(true);
   });
 
   it("produces RDF/XML output with RDF markup", async () => {
-    const result = await ExportFactory.create("rdfxml").export(snapshot);
+    const result = await ExportFactory.create("rdfxml").export(snapshot, exportClient);
 
     expect(String(result.data)).toContain("<rdf:RDF");
     expect(result.filename.endsWith(".rdf")).toBe(true);
   });
 
   it("exports JSON-LD from canonical concept data with preserved IRIs and concept-scheme structure", async () => {
-    const result = await ExportFactory.create("jsonld").export(semanticSnapshot);
+    const result = await ExportFactory.create("jsonld").export(semanticSnapshot, exportClient);
     const payload = JSON.parse(String(result.data));
     const graph = payload["@graph"] as Array<Record<string, unknown>>;
 
@@ -227,7 +335,7 @@ describe("ExportFactory", () => {
   });
 
   it("exports N-Triples with canonical concept IRIs and standards-aligned predicates", async () => {
-    const result = await ExportFactory.create("ntriples").export(semanticSnapshot);
+    const result = await ExportFactory.create("ntriples").export(semanticSnapshot, exportClient);
     const data = String(result.data);
 
     expect(data).toContain(
@@ -240,7 +348,7 @@ describe("ExportFactory", () => {
   });
 
   it("exports SKOS with preserved concept metadata and scheme membership", async () => {
-    const result = await ExportFactory.create("skos").export(semanticSnapshot);
+    const result = await ExportFactory.create("skos").export(semanticSnapshot, exportClient);
     const data = String(result.data);
 
     expect(data).toContain("<https://ontologyhub.local/ontologies/onto-1>");
@@ -254,7 +362,7 @@ describe("ExportFactory", () => {
 
   it("round-trips every supported export format back through the matching importer", async () => {
     for (const exporter of ExportFactory.getAll()) {
-      const exported = await exporter.export(snapshot);
+      const exported = await exporter.export(snapshot, exportClient);
       const importFile = createImportFile(exported.data, exported.filename);
       const importer = ImportFactory.createFromFile(importFile);
       const bundle = await importer.parse(importFile);
@@ -267,7 +375,7 @@ describe("ExportFactory", () => {
   });
 
   it("round-trips exported CSV relationships back into importable relationship rows", async () => {
-    const exported = await ExportFactory.create("csv").export(snapshot);
+    const exported = await ExportFactory.create("csv").export(snapshot, exportClient);
     const importFile = createImportFile(String(exported.data), exported.filename);
     const bundle = await ImportFactory.createFromFile(importFile).parse(importFile);
 
@@ -283,7 +391,7 @@ describe("ExportFactory", () => {
   });
 
   it("round-trips exported Excel relationships back into importable relationship rows", async () => {
-    const exported = await ExportFactory.create("excel").export(snapshot);
+    const exported = await ExportFactory.create("excel").export(snapshot, exportClient);
     const importFile = createImportFile(exported.data as Blob, exported.filename);
     const bundle = await ImportFactory.createFromFile(importFile).parse(importFile);
 
@@ -296,5 +404,126 @@ describe("ExportFactory", () => {
         }),
       ]),
     );
+  });
+
+  it("exports structured definition and relationship metadata without silently dropping attributes", async () => {
+    const result = await ExportFactory.create("csv").export(structuredMetadataSnapshot, exportClient);
+    const csv = String(result.data);
+
+    expect(csv).toContain("metadata");
+    expect(csv).toContain("related_relationships_metadata");
+    expect(csv).toContain("attr-code");
+    expect(csv).toContain("rel-attr-strength");
+    expect(csv).toContain("assoc-attr-evidence");
+  });
+
+  it("preserves standards-aligned predicate semantics in JSON-LD when relationship metadata provides predicate IRI", async () => {
+    const result = await ExportFactory.create("jsonld").export(structuredMetadataSnapshot, exportClient);
+    const payload = JSON.parse(String(result.data));
+    const graph = payload["@graph"] as Array<Record<string, unknown>>;
+    const sourceEntry = graph.find((entry) => entry["@id"] === "https://example.com/model#Source");
+
+    expect(sourceEntry).toBeDefined();
+    expect(sourceEntry).toMatchObject({
+      "skos:broader": [{ "@id": "https://example.com/model#Target" }],
+    });
+  });
+
+  it("surfaces standards validation issues as non-blocking export warnings", async () => {
+    const invalidSnapshot: OntologyExportSnapshot = {
+      ontology: {
+        id: "onto-invalid",
+        title: "Invalid Ontology",
+        description: "",
+        status: "draft",
+        tags: [],
+        updatedAt: "2026-03-20T10:00:00.000Z",
+      },
+      definitions: [
+        {
+          id: "def-invalid",
+          title: "Invalid",
+          description: "Invalid IRI definition",
+          content: "",
+          example: "",
+          status: "draft",
+          priority: "normal",
+          tags: [],
+          updatedAt: "2026-03-20T10:00:00.000Z",
+          viewCount: 0,
+          metadata: {
+            iri: "not-a-valid-iri",
+          },
+          relationships: [],
+        },
+      ],
+    };
+
+    const result = await ExportFactory.create("jsonld").export(invalidSnapshot, exportClient);
+
+    expect(result.success).toBe(true);
+    expect((result as any).warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/standards validation/i),
+      ]),
+    );
+    expect((result as any).standardsFindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          standardId: "nl-sbb",
+          ruleId: "nl_sbb_invalid_concept_iri",
+        }),
+      ]),
+    );
+  });
+
+  it("fails the export when a configured blocking standards finding is present", async () => {
+    fetchStandardsRuntimeSettings.mockResolvedValueOnce({
+      enabledStandards: ["rdf"],
+      ruleOverrides: {
+        rdf_invalid_subject_iri: "blocking",
+      },
+    });
+
+    const invalidSnapshot: OntologyExportSnapshot = {
+      ontology: {
+        id: "onto-invalid",
+        title: "Invalid Ontology",
+        description: "",
+        status: "draft",
+        tags: [],
+        updatedAt: "2026-03-20T10:00:00.000Z",
+      },
+      definitions: [
+        {
+          id: "def-invalid",
+          title: "Invalid",
+          description: "Invalid IRI definition",
+          content: "",
+          example: "",
+          status: "draft",
+          priority: "normal",
+          tags: [],
+          updatedAt: "2026-03-20T10:00:00.000Z",
+          viewCount: 0,
+          metadata: {
+            iri: "not-a-valid-iri",
+          },
+          relationships: [],
+        },
+      ],
+    };
+
+    await expect(ExportFactory.create("jsonld").export(invalidSnapshot, exportClient)).rejects.toThrow(
+      /blocking standards compliance issue/i,
+    );
+  });
+
+  it("fetches export standards settings through the injected client", async () => {
+    fetchStandardsRuntimeSettings.mockClear();
+
+    await ExportFactory.create("jsonld").export(snapshot, exportClient);
+
+    expect(fetchStandardsRuntimeSettings).toHaveBeenCalledWith(exportClient);
   });
 });

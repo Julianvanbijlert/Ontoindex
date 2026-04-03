@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +9,10 @@ const authState = {
   user: { id: "user-1" },
   role: "viewer",
 };
+
+const evaluateDefinitionStandardsCompliance = vi.fn();
+const useStandardsRuntimeSettings = vi.fn();
+const updateDefinitionMock = vi.fn();
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => authState,
@@ -47,13 +52,21 @@ vi.mock("@/lib/history-service", () => ({
 
 vi.mock("@/lib/entity-service", () => ({
   deleteDefinition: vi.fn(),
-  updateDefinition: vi.fn(),
+  updateDefinition: (...args: unknown[]) => updateDefinitionMock(...args),
 }));
 
 vi.mock("@/lib/workflow-service", () => ({
   fetchReviewerOptions: vi.fn().mockResolvedValue({ users: [], teams: [] }),
   formatReviewerLabel: () => "Reviewer",
   upsertDefinitionReviewRequest: vi.fn(),
+}));
+
+vi.mock("@/hooks/use-standards-runtime-settings", () => ({
+  useStandardsRuntimeSettings: () => useStandardsRuntimeSettings(),
+}));
+
+vi.mock("@/lib/standards/compliance", () => ({
+  evaluateDefinitionStandardsCompliance: (...args: unknown[]) => evaluateDefinitionStandardsCompliance(...args),
 }));
 
 vi.mock("@/integrations/supabase/client", () => ({
@@ -157,6 +170,28 @@ describe("DefinitionDetail", () => {
   beforeEach(() => {
     authState.user = { id: "user-1" };
     authState.role = "viewer";
+    updateDefinitionMock.mockReset();
+    updateDefinitionMock.mockResolvedValue({});
+    useStandardsRuntimeSettings.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["mim", "nl-sbb"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateDefinitionStandardsCompliance.mockReset();
+    evaluateDefinitionStandardsCompliance.mockReturnValue({
+      findings: [],
+      hasBlockingFindings: false,
+      summary: {
+        info: 0,
+        warning: 0,
+        error: 0,
+        blocking: 0,
+      },
+    });
   });
 
   it("keeps definition content visible for viewers while hiding edit and delete controls", async () => {
@@ -222,5 +257,65 @@ describe("DefinitionDetail", () => {
     expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /workflow/i })).not.toBeInTheDocument();
     expect(screen.getByText("Relations allowCreate:false")).toBeInTheDocument();
+  });
+
+  it("shows inline standards findings with explanations for the current definition", async () => {
+    evaluateDefinitionStandardsCompliance.mockReturnValue({
+      findings: [
+        {
+          id: "finding-1",
+          effectiveSeverity: "warning",
+          message: "Preferred label should align with the selected concept naming convention.",
+          explanation: "The current placeholder MIM/NL-SBB pack prefers a more explicit semantic label.",
+        },
+      ],
+      hasBlockingFindings: false,
+      summary: {
+        info: 0,
+        warning: 1,
+        error: 0,
+        blocking: 0,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Access Policy")).toBeInTheDocument());
+
+    expect(screen.getByText("Standards compliance")).toBeInTheDocument();
+    expect(screen.getByText(/preferred label should align/i)).toBeInTheDocument();
+    expect(screen.getByText(/prefers a more explicit semantic label/i)).toBeInTheDocument();
+  });
+
+  it("prevents saving when effective severity is blocking", async () => {
+    authState.role = "editor";
+    updateDefinitionMock.mockRejectedValueOnce(new Error("Definition cannot be saved while the source IRI is invalid."));
+    evaluateDefinitionStandardsCompliance.mockReturnValue({
+      findings: [
+        {
+          id: "finding-1",
+          effectiveSeverity: "blocking",
+          message: "Definition cannot be saved while the source IRI is invalid.",
+          explanation: "Blocking rules are enforced before save.",
+        },
+      ],
+      hasBlockingFindings: true,
+      summary: {
+        info: 0,
+        warning: 0,
+        error: 0,
+        blocking: 1,
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Access Policy")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(screen.getByText(/cannot be saved while the source iri is invalid/i)).toBeInTheDocument());
+    expect(updateDefinitionMock).toHaveBeenCalledTimes(1);
   });
 });

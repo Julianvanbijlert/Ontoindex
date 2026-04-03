@@ -16,6 +16,7 @@ export interface OntologyGraphRelationship {
   target_id: string;
   type: string;
   label?: string | null;
+  metadata?: Json;
 }
 
 export interface OntologyGraphDefinition {

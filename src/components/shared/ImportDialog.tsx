@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, Table, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
 import {
   importDefinitionsToOntology,
   REQUIRED_IMPORT_REQUIREMENTS,
@@ -47,6 +48,15 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
   const [processing, setProcessing] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const standardsSummary = result?.standardsFindings?.reduce((summary, finding) => {
+    summary[finding.effectiveSeverity] += 1;
+    return summary;
+  }, {
+    info: 0,
+    warning: 0,
+    error: 0,
+    blocking: 0,
+  });
 
   const processFile = async (nextFile: File) => {
     if (!canImportOntology(role)) {
@@ -54,6 +64,7 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
         success: false,
         imported: 0,
         warnings: [],
+        standardsFindings: [],
         errors: ["Your current role cannot import ontology data."],
         warningCount: 0,
         errorCount: 1,
@@ -178,20 +189,30 @@ export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, on
           </div>
 
           {result && (
-            <div className={cn("p-3 rounded-lg text-sm space-y-1", result.success ? "bg-success/10" : "bg-destructive/10")}>
-              <div className="flex items-center gap-2">
-                {result.success ? <CheckCircle2 className="h-4 w-4 text-success" /> : <AlertCircle className="h-4 w-4 text-destructive" />}
-                <span className={result.success ? "text-success" : "text-destructive"}>
-                  {result.success ? `${result.imported} items imported successfully` : "Import failed"}
-                </span>
+            <div className="space-y-3">
+              <div className={cn("p-3 rounded-lg text-sm space-y-1", result.success ? "bg-success/10" : "bg-destructive/10")}>
+                <div className="flex items-center gap-2">
+                  {result.success ? <CheckCircle2 className="h-4 w-4 text-success" /> : <AlertCircle className="h-4 w-4 text-destructive" />}
+                  <span className={result.success ? "text-success" : "text-destructive"}>
+                    {result.success ? `${result.imported} items imported successfully` : "Import failed"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <Badge variant="outline">Imported: {result.imported}</Badge>
+                  <Badge variant="outline">Warnings: {result.warningCount ?? result.warnings.length}</Badge>
+                  <Badge variant="outline">Errors: {result.errorCount ?? result.errors.length}</Badge>
+                </div>
+                {result.errors.map((e, i) => <p key={i} className="text-xs text-destructive">{e}</p>)}
+                {result.warnings.map((w, i) => <p key={i} className="text-xs text-warning">{w}</p>)}
               </div>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline">Imported: {result.imported}</Badge>
-                <Badge variant="outline">Warnings: {result.warningCount ?? result.warnings.length}</Badge>
-                <Badge variant="outline">Errors: {result.errorCount ?? result.errors.length}</Badge>
-              </div>
-              {result.errors.map((e, i) => <p key={i} className="text-xs text-destructive">{e}</p>)}
-              {result.warnings.map((w, i) => <p key={i} className="text-xs text-warning">{w}</p>)}
+              {(result.standardsFindings?.length || 0) > 0 && standardsSummary && (
+                <StandardsFindingsPanel
+                  title="Structured standards findings"
+                  findings={result.standardsFindings || []}
+                  summary={standardsSummary}
+                  emptyMessage="No structured standards findings."
+                />
+              )}
             </div>
           )}
 

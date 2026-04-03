@@ -19,6 +19,7 @@ export interface OntologyStandardsRelationship {
   target_id: string;
   type: string;
   label?: string | null;
+  metadata?: Json;
 }
 
 export interface OntologyStandardsDefinition {
@@ -76,6 +77,84 @@ function readClassMetadata(definition: OntologyStandardsDefinition) {
 
   const value = standards.class;
   return isRecord(value) ? value : null;
+}
+
+function readRelationshipMetadata(relationship: OntologyStandardsRelationship) {
+  return isRecord(relationship.metadata) ? relationship.metadata : null;
+}
+
+function readRelationshipStandardsMetadata(relationship: OntologyStandardsRelationship) {
+  const metadata = readRelationshipMetadata(relationship);
+
+  if (!metadata) {
+    return null;
+  }
+
+  const standards = metadata.standards;
+  return isRecord(standards) ? standards : null;
+}
+
+function readRelationMetadata(relationship: OntologyStandardsRelationship) {
+  const standards = readRelationshipStandardsMetadata(relationship);
+
+  if (!standards) {
+    return null;
+  }
+
+  const relation = standards.relation;
+  return isRecord(relation) ? relation : null;
+}
+
+function readAssociationMetadata(relationship: OntologyStandardsRelationship) {
+  const standards = readRelationshipStandardsMetadata(relationship);
+
+  if (!standards) {
+    return null;
+  }
+
+  const association = standards.association;
+  return isRecord(association) ? association : null;
+}
+
+function parseStandardsAttributes(prefix: string, value: unknown): StandardsAttribute[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item, index) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+
+    const name = readString(item.name);
+
+    if (!name) {
+      return [];
+    }
+
+    return [{
+      id: readString(item.id) || `${prefix}-attribute-${index + 1}`,
+      name,
+      label: readString(item.label) || undefined,
+      datatypeId: readString(item.datatypeId) || undefined,
+      cardinality: readString(item.cardinality) || undefined,
+      definition: readString(item.definition) || undefined,
+    } satisfies StandardsAttribute];
+  });
+}
+
+function toValidConceptRelationKind(value: unknown): StandardsConceptRelation["kind"] | null {
+  const normalized = readString(value)?.toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "broader" || normalized === "narrower" || normalized === "related" || normalized === "custom") {
+    return normalized;
+  }
+
+  return null;
 }
 
 function parseClassAttributes(definitionId: string, value: unknown): StandardsAttribute[] {
@@ -169,15 +248,28 @@ function buildUmlAssociations(
         continue;
       }
 
+      const associationMetadata = readAssociationMetadata(relationship);
+      const associationAttributes = parseStandardsAttributes(
+        `${relationship.id}-association`,
+        associationMetadata?.attributes,
+      );
+
       byId.set(relationship.id, {
         id: relationship.id,
-        label: getRelationshipDisplayLabel(relationship.type, relationship.label),
+        label: readString(associationMetadata?.label)
+          || getRelationshipDisplayLabel(relationship.type, relationship.label),
+        iri: readString(associationMetadata?.iri) || undefined,
         source: {
           classId: relationship.source_id,
+          role: readString(associationMetadata?.sourceRole) || undefined,
+          cardinality: readString(associationMetadata?.sourceCardinality) || undefined,
         },
         target: {
           classId: relationship.target_id,
+          role: readString(associationMetadata?.targetRole) || undefined,
+          cardinality: readString(associationMetadata?.targetCardinality) || undefined,
         },
+        ...(associationAttributes.length > 0 ? { attributes: associationAttributes } : {}),
         trace: {
           sourceIds: [relationship.id],
           sourceFormat: "supabase-ontology",
@@ -194,6 +286,18 @@ function toPredicateIri(type: string) {
 
   if (normalized === "is_a") {
     return "http://www.w3.org/2004/02/skos/core#broader";
+  }
+
+  if (normalized === "broader") {
+    return "http://www.w3.org/2004/02/skos/core#broader";
+  }
+
+  if (normalized === "narrower") {
+    return "http://www.w3.org/2004/02/skos/core#narrower";
+  }
+
+  if (normalized === "related") {
+    return "http://www.w3.org/2004/02/skos/core#related";
   }
 
   if (normalized === "part_of") {
@@ -216,6 +320,10 @@ function toConceptRelationKind(type: string): StandardsConceptRelation["kind"] {
 
   if (normalized === "narrower") {
     return "narrower";
+  }
+
+  if (normalized === "related") {
+    return "related";
   }
 
   if (normalized === "related_to") {
@@ -257,19 +365,27 @@ function buildConcept(schemeId: string, definition: OntologyStandardsDefinition)
 
 function buildConceptRelations(definitions: OntologyStandardsDefinition[]): StandardsConceptRelation[] {
   return definitions.flatMap((definition) =>
-    (definition.relationships || []).map((relationship) => ({
-      id: relationship.id,
-      sourceConceptId: relationship.source_id,
-      targetConceptId: relationship.target_id,
-      kind: toConceptRelationKind(relationship.type),
-      label: getRelationshipDisplayLabel(relationship.type, relationship.label),
-      predicateIri: toPredicateIri(relationship.type),
-      predicateKey: relationship.type,
-      trace: {
-        sourceIds: [relationship.id],
-        sourceFormat: "supabase-ontology",
-      },
-    })),
+    (definition.relationships || []).map((relationship) => {
+      const relationMetadata = readRelationMetadata(relationship);
+      const kind = toValidConceptRelationKind(relationMetadata?.kind) || toConceptRelationKind(relationship.type);
+      const predicateKey = readString(relationMetadata?.predicateKey) || relationship.type;
+      const relationAttributes = parseStandardsAttributes(`${relationship.id}-relation`, relationMetadata?.attributes);
+
+      return {
+        id: relationship.id,
+        sourceConceptId: relationship.source_id,
+        targetConceptId: relationship.target_id,
+        kind,
+        label: readString(relationMetadata?.label) || getRelationshipDisplayLabel(relationship.type, relationship.label),
+        predicateIri: readString(relationMetadata?.predicateIri) || toPredicateIri(predicateKey),
+        predicateKey,
+        ...(relationAttributes.length > 0 ? { attributes: relationAttributes } : {}),
+        trace: {
+          sourceIds: [relationship.id],
+          sourceFormat: "supabase-ontology",
+        },
+      } satisfies StandardsConceptRelation;
+    }),
   );
 }
 

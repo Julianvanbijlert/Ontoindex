@@ -130,7 +130,56 @@ function getErAttributes(node: GraphNode) {
 function getUmlRelation(edge: GraphEdge, aliasMap: Map<string, string>) {
   const source = aliasMap.get(edge.source) || sanitizeIdentifier(edge.source);
   const target = aliasMap.get(edge.target) || sanitizeIdentifier(edge.target);
-  const labelSuffix = edge.label ? ` : ${edge.label}` : "";
+  const properties = isRecord(edge.properties) ? edge.properties : undefined;
+  const relationDetails: string[] = [];
+
+  if (typeof properties?.sourceRole === "string" && properties.sourceRole.trim()) {
+    relationDetails.push(`sourceRole=${properties.sourceRole.trim()}`);
+  }
+
+  if (typeof properties?.targetRole === "string" && properties.targetRole.trim()) {
+    relationDetails.push(`targetRole=${properties.targetRole.trim()}`);
+  }
+
+  if (typeof properties?.sourceCardinality === "string" && properties.sourceCardinality.trim()) {
+    relationDetails.push(`sourceCardinality=${properties.sourceCardinality.trim()}`);
+  }
+
+  if (typeof properties?.targetCardinality === "string" && properties.targetCardinality.trim()) {
+    relationDetails.push(`targetCardinality=${properties.targetCardinality.trim()}`);
+  }
+
+  const associationAttributes = Array.isArray(properties?.associationAttributes)
+    ? properties.associationAttributes
+    : [];
+
+  if (associationAttributes.length > 0) {
+    const names = associationAttributes
+      .flatMap((attribute) => {
+        if (typeof attribute === "string") {
+          return attribute.trim() ? [attribute.trim()] : [];
+        }
+
+        if (isRecord(attribute) && typeof attribute.name === "string" && attribute.name.trim()) {
+          return [attribute.name.trim()];
+        }
+
+        return [];
+      });
+
+    if (names.length > 0) {
+      relationDetails.push(`attributes=${names.join("|")}`);
+    }
+  }
+
+  const relationLabel = edge.label
+    ? relationDetails.length > 0
+      ? `${edge.label} [${relationDetails.join(", ")}]`
+      : edge.label
+    : relationDetails.length > 0
+      ? `[${relationDetails.join(", ")}]`
+      : "";
+  const labelSuffix = relationLabel ? ` : ${relationLabel}` : "";
   const normalizedKind = edge.kind.toLowerCase();
 
   if (["is_a", "extends", "inheritance", "inherits_from"].includes(normalizedKind)) {

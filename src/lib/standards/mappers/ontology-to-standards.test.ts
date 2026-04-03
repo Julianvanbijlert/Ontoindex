@@ -161,4 +161,115 @@ describe("mapOntologyToStandardsModel", () => {
       ]),
     );
   });
+
+  it("prefers structured relationship standards metadata for NL-SBB semantics and UML association details", () => {
+    const model = mapOntologyToStandardsModel({
+      ontologyId: "onto-standards-rel",
+      definitions: [
+        {
+          id: "class-policy",
+          title: "Policy",
+          metadata: {
+            standards: {
+              class: {
+                packageId: "pkg-core",
+              },
+            },
+          },
+          relationships: [
+            {
+              id: "rel-broader-1",
+              source_id: "class-policy",
+              target_id: "class-control",
+              type: "related_to",
+              label: "linked",
+              metadata: {
+                standards: {
+                  relation: {
+                    kind: "broader",
+                    predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+                    predicateKey: "broader",
+                    attributes: [
+                      {
+                        id: "rel-attr-confidence",
+                        name: "confidence",
+                        datatypeId: "xsd:decimal",
+                      },
+                    ],
+                  },
+                  association: {
+                    sourceRole: "broaderConcept",
+                    targetRole: "narrowerConcept",
+                    sourceCardinality: "0..*",
+                    targetCardinality: "1",
+                    attributes: [
+                      {
+                        id: "assoc-attr-evidence",
+                        name: "evidenceLevel",
+                        datatypeId: "string",
+                      },
+                    ],
+                  },
+                },
+              },
+            } as any,
+          ],
+        },
+        {
+          id: "class-control",
+          title: "Control",
+          metadata: {
+            standards: {
+              class: {
+                packageId: "pkg-core",
+              },
+            },
+          },
+          relationships: [],
+        },
+      ],
+    });
+
+    expect(model.conceptRelations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "rel-broader-1",
+          kind: "broader",
+          predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+          predicateKey: "broader",
+          attributes: [
+            expect.objectContaining({
+              id: "rel-attr-confidence",
+              name: "confidence",
+              datatypeId: "xsd:decimal",
+            }),
+          ],
+        }),
+      ]),
+    );
+    expect(model.associations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "rel-broader-1",
+          source: expect.objectContaining({
+            classId: "class-policy",
+            role: "broaderConcept",
+            cardinality: "0..*",
+          }),
+          target: expect.objectContaining({
+            classId: "class-control",
+            role: "narrowerConcept",
+            cardinality: "1",
+          }),
+          attributes: [
+            expect.objectContaining({
+              id: "assoc-attr-evidence",
+              name: "evidenceLevel",
+              datatypeId: "string",
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
 });

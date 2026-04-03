@@ -5,6 +5,8 @@ import Settings from "@/pages/Settings";
 
 const fetchAdminChatSettings = vi.fn();
 const updateAdminChatSettings = vi.fn();
+const fetchAdminStandardsSettings = vi.fn();
+const updateAdminStandardsSettings = vi.fn();
 
 const authState = {
   profile: {
@@ -36,6 +38,15 @@ vi.mock("@/integrations/supabase/client", () => ({
 vi.mock("@/lib/chat-admin-settings-service", () => ({
   fetchAdminChatSettings: (...args: unknown[]) => fetchAdminChatSettings(...args),
   updateAdminChatSettings: (...args: unknown[]) => updateAdminChatSettings(...args),
+}));
+
+vi.mock("@/lib/standards/settings-service", () => ({
+  fetchAdminStandardsSettings: (...args: unknown[]) => fetchAdminStandardsSettings(...args),
+  updateAdminStandardsSettings: (...args: unknown[]) => updateAdminStandardsSettings(...args),
+  createDefaultStandardsSettings: () => ({
+    enabledStandards: ["mim", "nl-sbb", "rdf"],
+    ruleOverrides: {},
+  }),
 }));
 
 vi.mock("sonner", () => ({
@@ -72,6 +83,8 @@ describe("Settings", () => {
     authState.role = "viewer";
     fetchAdminChatSettings.mockReset();
     updateAdminChatSettings.mockReset();
+    fetchAdminStandardsSettings.mockReset();
+    updateAdminStandardsSettings.mockReset();
     fetchAdminChatSettings.mockResolvedValue({
       provider: {
         llmProvider: "gemini",
@@ -140,12 +153,25 @@ describe("Settings", () => {
         maxTokens: 700,
       },
     });
+    fetchAdminStandardsSettings.mockResolvedValue({
+      enabledStandards: ["mim", "nl-sbb", "rdf"],
+      ruleOverrides: {
+        mim_missing_class_label: "warning",
+      },
+    });
+    updateAdminStandardsSettings.mockResolvedValue({
+      enabledStandards: ["mim", "rdf"],
+      ruleOverrides: {
+        mim_missing_class_label: "blocking",
+      },
+    });
   });
 
   it("shows the appearance settings for non-admin users without any role-policy UI", () => {
     render(<Settings />);
 
     expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.queryByText("Standards Compliance")).not.toBeInTheDocument();
     expect(screen.queryByText("Role Management")).not.toBeInTheDocument();
     expect(screen.queryByText("Allow users to change their own role")).not.toBeInTheDocument();
   });
@@ -157,8 +183,10 @@ describe("Settings", () => {
 
     expect(await screen.findByText("Appearance")).toBeInTheDocument();
     expect(await screen.findByText("Admin AI Settings")).toBeInTheDocument();
+    expect(await screen.findByText("Standards Compliance")).toBeInTheDocument();
     expect((await screen.findAllByText("Gemini")).length).toBeGreaterThan(0);
     expect(fetchAdminChatSettings).toHaveBeenCalled();
+    expect(fetchAdminStandardsSettings).toHaveBeenCalled();
   });
 
   it("saves appearance settings normally", async () => {
@@ -185,6 +213,27 @@ describe("Settings", () => {
     expect(updateAdminChatSettings).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       providerKeys: expect.objectContaining({
         geminiApiKey: "secret-key",
+      }),
+    }));
+  });
+
+  it("lets admins enable standards and change per-rule severity overrides", async () => {
+    authState.role = "admin";
+
+    render(<Settings />);
+
+    expect(await screen.findByText("Standards Compliance")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: /enable rdf/i }));
+    fireEvent.click(screen.getByRole("button", { name: /mim missing class label severity/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^blocking$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save standards settings/i }));
+
+    await waitFor(() => expect(updateAdminStandardsSettings).toHaveBeenCalled());
+    expect(updateAdminStandardsSettings).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      enabledStandards: expect.not.arrayContaining(["rdf"]),
+      ruleOverrides: expect.objectContaining({
+        mim_missing_class_label: "blocking",
       }),
     }));
   });

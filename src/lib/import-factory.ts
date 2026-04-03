@@ -26,6 +26,7 @@ export interface ParsedImportRelationship {
   targetRef: string;
   type: string;
   label?: string;
+  metadata?: Json;
 }
 
 export interface ParsedImportBundle {
@@ -53,8 +54,10 @@ export const supportedImportColumns = [
   "tag",
   "priority",
   "status",
+  "metadata",
   "related_definitions",
   "related_relationships",
+  "related_relationships_metadata",
 ];
 
 function normalizeHeader(header: string) {
@@ -163,12 +166,110 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parseJsonValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return null;
+    }
+  }
+
+  return value;
+}
+
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  const parsed = parseJsonValue(value);
+  return isObjectRecord(parsed) ? parsed : null;
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  const parsed = parseJsonValue(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 function toRelationshipType(relation: StandardsConceptRelation) {
   if (relation.predicateKey?.trim()) {
     return relation.predicateKey.trim();
   }
 
   return relation.kind;
+}
+
+function buildConceptRelationMetadata(relation: StandardsConceptRelation): Json | undefined {
+  const hasAttributes = (relation.attributes ?? []).length > 0;
+  const hasStructuredRelationMetadata = hasAttributes
+    || !!relation.kind
+    || !!relation.predicateIri
+    || !!relation.predicateKey;
+
+  if (!hasStructuredRelationMetadata) {
+    return undefined;
+  }
+
+  return {
+    standards: {
+      relation: {
+        kind: relation.kind,
+        ...(relation.predicateIri ? { predicateIri: relation.predicateIri } : {}),
+        ...(relation.predicateKey ? { predicateKey: relation.predicateKey } : {}),
+        ...(hasAttributes
+          ? {
+              attributes: (relation.attributes ?? []).map((attribute) => ({
+                id: attribute.id,
+                name: attribute.name,
+                ...(attribute.label ? { label: attribute.label } : {}),
+                ...(attribute.datatypeId ? { datatypeId: attribute.datatypeId } : {}),
+                ...(attribute.cardinality ? { cardinality: attribute.cardinality } : {}),
+                ...(attribute.definition ? { definition: attribute.definition } : {}),
+              })),
+            }
+          : {}),
+      },
+    },
+  } satisfies Json;
+}
+
+function buildAssociationRelationshipMetadata(association: StandardsModel["associations"][number]): Json | undefined {
+  const hasAssociationAttributes = (association.attributes ?? []).length > 0;
+  const hasAssociationMetadata = !!association.source.role
+    || !!association.target.role
+    || !!association.source.cardinality
+    || !!association.target.cardinality
+    || hasAssociationAttributes;
+
+  if (!hasAssociationMetadata) {
+    return undefined;
+  }
+
+  return {
+    standards: {
+      association: {
+        ...(association.source.role ? { sourceRole: association.source.role } : {}),
+        ...(association.target.role ? { targetRole: association.target.role } : {}),
+        ...(association.source.cardinality ? { sourceCardinality: association.source.cardinality } : {}),
+        ...(association.target.cardinality ? { targetCardinality: association.target.cardinality } : {}),
+        ...(hasAssociationAttributes
+          ? {
+              attributes: (association.attributes ?? []).map((attribute) => ({
+                id: attribute.id,
+                name: attribute.name,
+                ...(attribute.label ? { label: attribute.label } : {}),
+                ...(attribute.datatypeId ? { datatypeId: attribute.datatypeId } : {}),
+                ...(attribute.cardinality ? { cardinality: attribute.cardinality } : {}),
+                ...(attribute.definition ? { definition: attribute.definition } : {}),
+              })),
+            }
+          : {}),
+      },
+    },
+  } satisfies Json;
 }
 
 function buildClassRowMetadata(standardsModel: StandardsModel, item: StandardsClass): Json {
@@ -249,14 +350,25 @@ function buildBundleFromStandardsModel(standardsModel: StandardsModel, warnings:
       targetRef: relation.targetConceptId,
       type: toRelationshipType(relation),
       label: relation.label,
+      metadata: buildConceptRelationMetadata(relation),
     })),
     ...standardsModel.associations.map((association) => ({
       sourceRef: association.source.classId,
       targetRef: association.target.classId,
       type: "related_to",
       label: association.label,
+      metadata: buildAssociationRelationshipMetadata(association),
     })),
   ] satisfies ParsedImportRelationship[];
+
+  if (rows.length === 0) {
+    return {
+      rows: [],
+      relationships,
+      warnings,
+      standardsModel,
+    };
+  }
 
   return {
     ...validateRows(rows, warnings),
@@ -416,6 +528,35 @@ function parseRowRelationships(rawRow: Record<string, unknown>, sourceRef: strin
     accumulator[normalizeHeader(key)] = value;
     return accumulator;
   }, {});
+  const structuredRelationships = parseJsonArray(normalized.related_relationships_metadata)
+    .flatMap((item) => {
+      if (!isObjectRecord(item)) {
+        return [];
+      }
+
+      const targetRef = readOptionalString(item.targetRef)
+        || readOptionalString(item.target_id)
+        || readOptionalString(item.targetId)
+        || readOptionalString(item.target)
+        || readOptionalString(item.targetTitle)
+        || readOptionalString(item.target_title);
+
+      if (!targetRef) {
+        return [];
+      }
+
+      const type = readOptionalString(item.type) || "related_to";
+      const label = readOptionalString(item.label) || undefined;
+      const metadata = parseJsonRecord(item.metadata);
+
+      return [{
+        sourceRef,
+        targetRef,
+        type,
+        ...(label ? { label } : {}),
+        ...(metadata ? { metadata: metadata as Json } : {}),
+      } satisfies ParsedImportRelationship];
+    });
 
   const explicitRelationships = parseDelimitedValues(normalized.related_relationships).map((value) => {
     const [rawLabel, rawTarget] = value.split(/\s*->\s*/);
@@ -442,7 +583,22 @@ function parseRowRelationships(rawRow: Record<string, unknown>, sourceRef: strin
       label: "related",
     } satisfies ParsedImportRelationship));
 
-  return [...explicitRelationships.filter(Boolean), ...fallbackRelationships];
+  const byKey = new Map<string, ParsedImportRelationship>();
+  const candidates = [
+    ...structuredRelationships,
+    ...explicitRelationships.filter(Boolean),
+    ...fallbackRelationships,
+  ];
+
+  candidates.forEach((relationship) => {
+    const key = `${relationship.sourceRef}::${relationship.targetRef}::${relationship.type}::${relationship.label || ""}`;
+
+    if (!byKey.has(key)) {
+      byKey.set(key, relationship);
+    }
+  });
+
+  return [...byKey.values()];
 }
 
 function buildRowFromRecord(rawRow: Record<string, unknown>, rowNumber: number, warnings: string[], externalId?: string) {
@@ -474,7 +630,7 @@ function buildRowFromRecord(rawRow: Record<string, unknown>, rowNumber: number, 
     section: normalized.section ?? normalized["onto:section"],
     group: normalized.group ?? normalized["onto:group"],
   });
-  const explicitMetadata = isObjectRecord(normalized.metadata) ? normalized.metadata : null;
+  const explicitMetadata = parseJsonRecord(normalized.metadata);
   const metadata = inferredMetadata || explicitMetadata
     ? {
         ...(inferredMetadata ?? {}),

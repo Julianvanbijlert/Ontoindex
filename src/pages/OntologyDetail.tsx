@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -31,7 +31,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { deleteOntology, updateDefinition, updateOntology } from "@/lib/entity-service";
+import { createDefinition, deleteOntology, updateDefinition, updateOntology } from "@/lib/entity-service";
 import { emitAppDataChanged, subscribeToAppDataChanges } from "@/lib/entity-events";
 import { recordEntityView } from "@/lib/history-service";
 import {
@@ -51,7 +51,14 @@ import { GraphView } from "@/components/graph/GraphView";
 import { mapOntologyToGraphModel } from "@/lib/graph/mappers/ontology-to-graph";
 import type { OntologyGraphDefinition, OntologyGraphRelationship } from "@/lib/graph/mappers/ontology-to-graph";
 import type { Database, Enums } from "@/integrations/supabase/types";
+import type { Json } from "@/integrations/supabase/types";
 import type { RelationshipSelection } from "@/lib/relationship-service";
+import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
+import { useStandardsRuntimeSettings } from "@/hooks/use-standards-runtime-settings";
+import {
+  evaluateOntologyStandardsCompliance,
+  evaluateRelationshipStandardsCompliance,
+} from "@/lib/standards/compliance";
 
 type PriorityLevel = Enums<"priority_level">;
 type WorkflowStatus = Enums<"workflow_status">;
@@ -107,6 +114,7 @@ export default function OntologyDetail() {
   const [pendingConnection, setPendingConnection] = useState<PendingGraphConnection | null>(null);
   const [graphRelationType, setGraphRelationType] = useState<RelationshipSelection>(predefinedRelationshipTypes[0]);
   const [graphCustomRelationType, setGraphCustomRelationType] = useState("");
+  const [graphSuggestionMetadata, setGraphSuggestionMetadata] = useState<Json | null>(null);
   const [graphRenameDefinitionId, setGraphRenameDefinitionId] = useState<string | null>(null);
   const [graphRenameTitle, setGraphRenameTitle] = useState("");
   const [graphViewMode, setGraphViewMode] = useState<"ontology" | "uml-class">("ontology");
@@ -130,6 +138,7 @@ export default function OntologyDetail() {
   const canMutateGraph = canEditGraph(role);
   const canAddDefinition = canCreateDefinition(role);
   const viewedOntologyIdRef = useRef<string | null>(null);
+  const { settings: standardsSettings } = useStandardsRuntimeSettings();
 
   const fetchAll = async () => {
     if (!id) return;
@@ -193,6 +202,60 @@ export default function OntologyDetail() {
       }),
     [definitions, graphViewMode, ontology?.id],
   );
+  const ontologyCompliance = useMemo(
+    () => {
+      if (!standardsSettings) {
+        return {
+          findings: [],
+          relationSuggestions: [],
+          hasBlockingFindings: false,
+          summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+        };
+      }
+
+      return evaluateOntologyStandardsCompliance({
+        ontologyId: ontology?.id,
+        ontologyTitle: ontology?.title,
+        definitions,
+        settings: standardsSettings,
+      });
+    },
+    [definitions, ontology?.id, ontology?.title, standardsSettings],
+  );
+  const graphRelationshipCompliance = useMemo(
+    () => {
+      if (!standardsSettings) {
+        return {
+          findings: [],
+          relationSuggestions: [],
+          hasBlockingFindings: false,
+          summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+        };
+      }
+
+      return evaluateRelationshipStandardsCompliance({
+        ontologyId: ontology?.id,
+        ontologyTitle: ontology?.title,
+        sourceDefinition: {
+          id: pendingConnection?.source || "source-definition",
+          title: definitions.find((definition) => definition.id === pendingConnection?.source)?.title || "Source definition",
+          metadata: definitions.find((definition) => definition.id === pendingConnection?.source)?.metadata,
+        },
+        targetDefinition: pendingConnection?.target
+          ? {
+              id: pendingConnection.target,
+              title: definitions.find((definition) => definition.id === pendingConnection.target)?.title || "Target definition",
+              metadata: definitions.find((definition) => definition.id === pendingConnection.target)?.metadata,
+            }
+          : null,
+        selectedType: graphRelationType,
+        customType: graphCustomRelationType,
+        relationshipMetadata: graphSuggestionMetadata,
+        settings: standardsSettings,
+      });
+    },
+    [definitions, graphCustomRelationType, graphRelationType, graphSuggestionMetadata, ontology?.id, ontology?.title, pendingConnection, standardsSettings],
+  );
 
   const handleSaveOntology = async () => {
     if (!canMutateOntology) { toast.error("Your current role is read-only."); return; }
@@ -228,23 +291,33 @@ export default function OntologyDetail() {
     if (!canAddDefinition) { toast.error("Your current role is read-only."); return; }
     if (!newDef.title.trim()) { toast.error("Title required"); return; }
     setCreating(true);
-    const { data, error } = await supabase.from("definitions").insert({
-      title: newDef.title.trim(), description: newDef.description.trim(),
-      content: newDef.content.trim(), example: newDef.example.trim(),
-      ontology_id: id, priority: newDef.priority,
-      created_by: user?.id, status: "draft" satisfies WorkflowStatus,
-    }).select().single();
-    if (error) toast.error(error.message);
-    else {
-      await supabase.from("activity_events").insert({
-        user_id: user?.id, action: "created", entity_type: "definition",
-        entity_id: data.id, entity_title: data.title,
+    try {
+      const data = await createDefinition(supabase, {
+        ontologyId: id!,
+        ontologyTitle: ontology?.title,
+        createdBy: user?.id,
+        definition: {
+          title: newDef.title.trim(),
+          description: newDef.description.trim(),
+          content: newDef.content.trim(),
+          example: newDef.example.trim(),
+          priority: newDef.priority,
+          status: "draft" satisfies WorkflowStatus,
+        },
+        standards: {
+          ontologyId: id,
+          ontologyTitle: ontology?.title,
+          status: "draft",
+          relationships: [],
+        },
       });
       toast.success("Definition created");
       setCreateDefOpen(false);
       setNewDef({ title: "", description: "", content: "", example: "", priority: "normal" });
       emitAppDataChanged({ entityType: "definition", action: "created", entityId: data.id });
       fetchAll();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create definition");
     }
     setCreating(false);
   };
@@ -277,6 +350,7 @@ export default function OntologyDetail() {
     setPendingConnection(connection);
     setGraphRelationType(predefinedRelationshipTypes[0]);
     setGraphCustomRelationType("");
+    setGraphSuggestionMetadata(null);
     setGraphRelationOpen(true);
   };
 
@@ -293,12 +367,26 @@ export default function OntologyDetail() {
         selectedType: graphRelationType,
         customType: graphCustomRelationType,
         createdBy: user.id,
+        metadata: graphSuggestionMetadata || undefined,
+        standards: {
+          ontologyId: ontology?.id,
+          ontologyTitle: ontology?.title,
+          sourceDefinition: {
+            title: definitions.find((definition) => definition.id === pendingConnection.source)?.title,
+            metadata: definitions.find((definition) => definition.id === pendingConnection.source)?.metadata,
+          },
+          targetDefinition: {
+            title: definitions.find((definition) => definition.id === pendingConnection.target)?.title,
+            metadata: definitions.find((definition) => definition.id === pendingConnection.target)?.metadata,
+          },
+        },
       });
       toast.success("Relationship created");
       emitAppDataChanged({ entityType: "relationship", action: "created", entityId: data.id });
       fetchAll();
-      setGraphRelationOpen(false);
-      setPendingConnection(null);
+        setGraphRelationOpen(false);
+        setPendingConnection(null);
+        setGraphSuggestionMetadata(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to create relationship");
     }
@@ -346,6 +434,13 @@ export default function OntologyDetail() {
           description: selectedDefinition.description,
           content: selectedDefinition.content,
           example: selectedDefinition.example,
+        },
+        standards: {
+          ontologyId: ontology?.id,
+          ontologyTitle: ontology?.title,
+          status: selectedDefinition.status,
+          metadata: selectedDefinition.metadata,
+          relationships: selectedDefinition.relationships || [],
         },
       });
       toast.success("Definition renamed");
@@ -516,6 +611,12 @@ export default function OntologyDetail() {
         <TabsContent value="graph" className="mt-0">
           <Card className="border-border/50 sticky top-20">
             <CardContent className="space-y-4 p-4">
+              <StandardsFindingsPanel
+                title="Model standards summary"
+                findings={ontologyCompliance.findings.slice(0, 3)}
+                summary={ontologyCompliance.summary}
+                emptyMessage="No active standards findings for this ontology snapshot."
+              />
               {definitions.length > 0 ? (
                 <div className="flex items-center justify-end gap-2">
                   <span className="text-xs text-muted-foreground">View mode</span>
@@ -573,8 +674,15 @@ export default function OntologyDetail() {
         </TabsContent>
 
         <TabsContent value="details" className="mt-0">
-          <Card className="border-border/50">
-            <CardContent className="p-6 space-y-4">
+          <div className="space-y-4">
+            <StandardsFindingsPanel
+              title="Ontology standards summary"
+              findings={ontologyCompliance.findings}
+              summary={ontologyCompliance.summary}
+              emptyMessage="No active standards findings for this ontology snapshot."
+            />
+            <Card className="border-border/50">
+              <CardContent className="p-6 space-y-4">
               <div>
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">Description</h3>
                 <p className="text-sm text-foreground">{ontology.description || "No description"}</p>
@@ -584,8 +692,9 @@ export default function OntologyDetail() {
                 <span>Updated {new Date(ontology.updated_at).toLocaleDateString()}</span>
                 <span>{ontology.view_count} views</span>
               </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -603,9 +712,19 @@ export default function OntologyDetail() {
       />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} ontologyId={ontology.id} ontologyTitle={ontology.title} entityName="definitions" />
 
-      <Dialog open={graphRelationOpen} onOpenChange={setGraphRelationOpen}>
+      <Dialog open={graphRelationOpen} onOpenChange={(open) => {
+        setGraphRelationOpen(open);
+        if (!open) {
+          setGraphSuggestionMetadata(null);
+        }
+      }}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Create Relationship</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Create Relationship</DialogTitle>
+            <DialogDescription>
+              Connect two definitions from the graph. Standards suggestions are shown when they are available.
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border border-border/50 bg-muted/30 p-3 text-sm">
               <p className="font-medium text-foreground">
@@ -627,7 +746,10 @@ export default function OntologyDetail() {
             </div>
             <div className="space-y-2">
               <Label>Relationship type</Label>
-              <Select value={graphRelationType} onValueChange={(value) => setGraphRelationType(value as RelationshipSelection)}>
+               <Select value={graphRelationType} onValueChange={(value) => {
+                 setGraphRelationType(value as RelationshipSelection);
+                 setGraphSuggestionMetadata(null);
+               }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {predefinedRelationshipTypes.map((type) => (
@@ -640,8 +762,46 @@ export default function OntologyDetail() {
             {graphRelationType === CUSTOM_RELATION_TYPE && (
               <div className="space-y-2">
                 <Label>Custom relation type</Label>
-                <Input value={graphCustomRelationType} onChange={(event) => setGraphCustomRelationType(event.target.value)} />
+                <Input value={graphCustomRelationType} onChange={(event) => {
+                  setGraphCustomRelationType(event.target.value);
+                  setGraphSuggestionMetadata(null);
+                }} />
               </div>
+            )}
+            {graphRelationshipCompliance.relationSuggestions.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">Suggested compliant relations</p>
+                <div className="grid gap-2">
+                  {graphRelationshipCompliance.relationSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion.id}
+                      type="button"
+                      className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/50"
+                       onClick={() => {
+                         setGraphRelationType(suggestion.selectedType);
+                         setGraphCustomRelationType(suggestion.customType || "");
+                         setGraphSuggestionMetadata(suggestion.metadata || null);
+                       }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-foreground">{suggestion.label}</p>
+                        <Badge variant="outline" className="bg-background/70 text-[10px]">
+                          {suggestion.standardId}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{suggestion.explanation}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {graphRelationshipCompliance.findings.length > 0 && (
+              <StandardsFindingsPanel
+                title="Current relationship findings"
+                findings={graphRelationshipCompliance.findings}
+                summary={graphRelationshipCompliance.summary}
+                emptyMessage="No active standards findings for this relationship."
+              />
             )}
             <Button onClick={handleCreateGraphRelationship} disabled={creatingGraphRelation} className="w-full">
               {creatingGraphRelation && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -653,7 +813,12 @@ export default function OntologyDetail() {
 
       <Dialog open={graphRenameOpen} onOpenChange={setGraphRenameOpen}>
         <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle>Rename Definition</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Rename Definition</DialogTitle>
+            <DialogDescription>
+              Update the actual definition title represented by the selected graph node.
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Definition name</Label>

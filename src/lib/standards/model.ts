@@ -64,6 +64,7 @@ export interface StandardsAssociation {
   definition?: string;
   source: StandardsAssociationEnd;
   target: StandardsAssociationEnd;
+  attributes?: StandardsAttribute[];
   trace?: StandardsTraceability;
 }
 
@@ -102,6 +103,7 @@ export interface StandardsConceptRelation {
   label?: string;
   predicateIri?: string;
   predicateKey?: string;
+  attributes?: StandardsAttribute[];
   trace?: StandardsTraceability;
 }
 
@@ -161,13 +163,19 @@ export function createStandardsModel(input: Partial<StandardsModel> = {}): Stand
       identifiers: item.identifiers ?? [],
       superClassIds: item.superClassIds ?? [],
     })),
-    associations: input.associations ?? [],
+    associations: (input.associations ?? []).map((item) => ({
+      ...item,
+      attributes: item.attributes ?? [],
+    })),
     conceptSchemes: input.conceptSchemes ?? [],
     concepts: (input.concepts ?? []).map((item) => ({
       ...item,
       altLabels: item.altLabels ?? [],
     })),
-    conceptRelations: input.conceptRelations ?? [],
+    conceptRelations: (input.conceptRelations ?? []).map((item) => ({
+      ...item,
+      attributes: item.attributes ?? [],
+    })),
     triples: input.triples ?? [],
     metadata: input.metadata,
   };

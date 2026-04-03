@@ -3,6 +3,19 @@ import { utils, write } from "xlsx";
 
 import { importDefinitionsToOntology } from "@/lib/import-service";
 
+const fetchStandardsRuntimeSettings = vi.fn().mockResolvedValue({
+  enabledStandards: ["mim", "nl-sbb", "rdf"],
+  ruleOverrides: {},
+});
+
+vi.mock("@/lib/standards/settings-service", () => ({
+  fetchStandardsRuntimeSettings: (...args: unknown[]) => fetchStandardsRuntimeSettings(...args),
+  createDefaultStandardsSettings: () => ({
+    enabledStandards: ["mim", "nl-sbb", "rdf"],
+    ruleOverrides: {},
+  }),
+}));
+
 describe("import-service", () => {
   it("parses CSV rows and sends them to the ontology import rpc", async () => {
     const rpc = vi.fn().mockResolvedValue({
@@ -293,9 +306,149 @@ describe("import-service", () => {
         expect.objectContaining({
           source_id: "definition-2",
           target_id: "definition-1",
-          type: "related_to",
+          type: "is_a",
           label: null,
           created_by: "user-1",
+        }),
+      ]),
+    );
+  });
+
+  it("surfaces standards validation issues as non-blocking import warnings", async () => {
+    const definitionSingle = vi.fn().mockResolvedValue({ data: { id: "definition-invalid-1" }, error: null });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      if (table === "activity_events") {
+        return { insert: activityInsert };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { importedCount: 1, warnings: [] },
+        error: null,
+      }),
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      },
+      from,
+    } as any;
+    const file = {
+      name: "invalid.nt",
+      text: vi.fn().mockResolvedValue(
+        [
+          '<not-a-valid-iri> <http://www.w3.org/2004/02/skos/core#prefLabel> "Access Policy" .',
+          '<not-a-valid-iri> <http://www.w3.org/2004/02/skos/core#definition> "Policy definition" .',
+        ].join("\n"),
+      ),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result.success).toBe(true);
+    expect(result.warningCount).toBeGreaterThan(0);
+    expect(result.warnings.join("\n")).toMatch(/standards validation/i);
+    expect(result.standardsFindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          standardId: "rdf",
+          ruleId: "rdf_invalid_subject_iri",
+          path: expect.stringContaining("triples["),
+        }),
+      ]),
+    );
+  });
+
+  it("preserves relationship standards metadata in direct persistence payloads", async () => {
+    const definitionSingles = [
+      vi.fn().mockResolvedValue({ data: { id: "definition-1" }, error: null }),
+      vi.fn().mockResolvedValue({ data: { id: "definition-2" }, error: null }),
+    ];
+    const definitionSelect = vi
+      .fn()
+      .mockReturnValueOnce({ single: definitionSingles[0] })
+      .mockReturnValueOnce({ single: definitionSingles[1] });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const relationshipInsert = vi.fn().mockResolvedValue({ error: null });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn((table: string) => {
+      if (table === "definitions") {
+        return { insert: definitionInsert };
+      }
+
+      if (table === "relationships") {
+        return { insert: relationshipInsert };
+      }
+
+      if (table === "activity_events") {
+        return { insert: activityInsert };
+      }
+
+      throw new Error(`Unexpected table ${table}`);
+    });
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { importedCount: 2, warnings: [] },
+        error: null,
+      }),
+      auth: {
+        getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } }, error: null }),
+      },
+      from,
+    } as any;
+    const file = {
+      name: "definitions.jsonld",
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          "@graph": [
+            {
+              "@id": "https://example.com/schemes/security",
+              "@type": "skos:ConceptScheme",
+              "rdfs:label": "Security Scheme",
+            },
+            {
+              "@id": "https://example.com/concepts/control",
+              "@type": "skos:Concept",
+              "skos:inScheme": { "@id": "https://example.com/schemes/security" },
+              "skos:prefLabel": "Control",
+              "skos:definition": "Control definition",
+            },
+            {
+              "@id": "https://example.com/concepts/access-policy",
+              "@type": "skos:Concept",
+              "skos:inScheme": { "@id": "https://example.com/schemes/security" },
+              "skos:prefLabel": "Access Policy",
+              "skos:definition": "Policy definition",
+              "skos:broader": { "@id": "https://example.com/concepts/control" },
+            },
+          ],
+        }),
+      ),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result.success).toBe(true);
+    expect(relationshipInsert).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source_id: "definition-2",
+          target_id: "definition-1",
+          metadata: expect.objectContaining({
+            standards: expect.objectContaining({
+              relation: expect.objectContaining({
+                kind: "broader",
+                predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+              }),
+            }),
+          }),
         }),
       ]),
     );
@@ -413,5 +566,37 @@ describe("import-service", () => {
     expect(result.success).toBe(true);
     expect(result.imported).toBe(1);
     expect(from).not.toHaveBeenCalledWith("search_documents");
+  });
+
+  it("fails the import when a configured blocking standards finding is present", async () => {
+    fetchStandardsRuntimeSettings.mockResolvedValueOnce({
+      enabledStandards: ["rdf"],
+      ruleOverrides: {
+        rdf_invalid_subject_iri: "blocking",
+      },
+    });
+
+    const client = {
+      rpc: vi.fn().mockResolvedValue({
+        data: { importedCount: 1, warnings: [] },
+        error: null,
+      }),
+      auth: {
+        getUser: vi.fn(),
+      },
+      from: vi.fn(),
+    } as any;
+    const file = {
+      name: "invalid.nt",
+      text: vi.fn().mockResolvedValue(
+        '<not-a-valid-iri> <http://www.w3.org/2004/02/skos/core#prefLabel> "Access Policy" .',
+      ),
+    } as unknown as File;
+
+    const result = await importDefinitionsToOntology(client, "onto-1", file);
+
+    expect(result.success).toBe(false);
+    expect(result.errors.join("\n")).toMatch(/blocking standards compliance issue/i);
+    expect(client.from).not.toHaveBeenCalled();
   });
 });

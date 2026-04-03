@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { Constants, type Database, type Enums } from "@/integrations/supabase/types";
+import { Constants, type Database, type Enums, type Json } from "@/integrations/supabase/types";
 import { logActivityEvent } from "@/lib/history-service";
+import {
+  buildPersistedRelationshipMetadata,
+  evaluateRelationshipStandardsCompliance,
+  StandardsBlockingFindingsError,
+} from "@/lib/standards/compliance";
+import type { StandardsRuntimeSettings } from "@/lib/standards/engine/types";
+import { fetchStandardsRuntimeSettings } from "@/lib/standards/settings-service";
 
 export const predefinedRelationshipTypes = Constants.public.Enums.relationship_type;
 export const CUSTOM_RELATION_TYPE = "__custom__";
@@ -9,6 +16,20 @@ export const CUSTOM_RELATION_TYPE = "__custom__";
 export type PredefinedRelationshipType = Enums<"relationship_type">;
 export type RelationshipSelection = PredefinedRelationshipType | typeof CUSTOM_RELATION_TYPE;
 type AppSupabaseClient = SupabaseClient<Database>;
+
+interface RelationshipStandardsValidationInput {
+  ontologyId?: string | null;
+  ontologyTitle?: string | null;
+  settings?: StandardsRuntimeSettings;
+  sourceDefinition?: {
+    title?: string;
+    metadata?: Json | null;
+  };
+  targetDefinition?: {
+    title?: string;
+    metadata?: Json | null;
+  };
+}
 
 function isPredefinedRelationshipType(value: string): value is PredefinedRelationshipType {
   return predefinedRelationshipTypes.includes(value as PredefinedRelationshipType);
@@ -39,6 +60,7 @@ export function buildRelationshipPayload(input: {
   selectedType: RelationshipSelection;
   customType?: string;
   createdBy: string;
+  metadata?: Json;
 }) {
   const customType = input.customType?.trim() || "";
 
@@ -53,6 +75,7 @@ export function buildRelationshipPayload(input: {
       type: "related_to" as const,
       label: customType,
       created_by: input.createdBy,
+      metadata: input.metadata ?? null,
     };
   }
 
@@ -62,6 +85,7 @@ export function buildRelationshipPayload(input: {
     type: input.selectedType,
     label: null,
     created_by: input.createdBy,
+    metadata: input.metadata ?? null,
   };
 }
 
@@ -73,13 +97,53 @@ export async function createRelationshipRecord(
     selectedType: RelationshipSelection;
     customType?: string;
     createdBy: string;
+    metadata?: Json;
+    standards?: RelationshipStandardsValidationInput;
   },
 ) {
-  const payload = buildRelationshipPayload(input);
+  const persistedMetadata = buildPersistedRelationshipMetadata({
+    selectedType: input.selectedType,
+    customType: input.customType,
+    relationshipMetadata: input.metadata,
+  });
+
+  if (input.standards) {
+    const settings = await fetchStandardsRuntimeSettings(client);
+    const compliance = evaluateRelationshipStandardsCompliance({
+      ontologyId: input.standards.ontologyId,
+      ontologyTitle: input.standards.ontologyTitle,
+      sourceDefinition: {
+        id: input.sourceId,
+        title: input.standards.sourceDefinition?.title || "Source definition",
+        metadata: input.standards.sourceDefinition?.metadata,
+      },
+      targetDefinition: {
+        id: input.targetId,
+        title: input.standards.targetDefinition?.title || "Target definition",
+        metadata: input.standards.targetDefinition?.metadata,
+      },
+      selectedType: input.selectedType,
+      customType: input.customType,
+      relationshipMetadata: persistedMetadata,
+      settings,
+    });
+
+    if (compliance.hasBlockingFindings) {
+      throw new StandardsBlockingFindingsError(
+        "Resolve the blocking standards compliance issues before creating this relationship.",
+        compliance,
+      );
+    }
+  }
+
+  const payload = buildRelationshipPayload({
+    ...input,
+    metadata: persistedMetadata,
+  });
   const { data, error } = await client
     .from("relationships")
     .insert(payload)
-    .select("id, source_id, target_id, type, label")
+    .select("id, source_id, target_id, type, label, metadata")
     .single();
 
   if (error) {

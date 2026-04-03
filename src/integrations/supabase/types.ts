@@ -87,6 +87,7 @@ export type Database = {
           embedding_provider: string
           embedding_vector_dimensions: number
           id: number
+          standards_settings: Json | null
           updated_at: string
           updated_by: string | null
         }
@@ -112,6 +113,7 @@ export type Database = {
           embedding_provider?: string
           embedding_vector_dimensions?: number
           id?: number
+          standards_settings?: Json | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -137,6 +139,7 @@ export type Database = {
           embedding_provider?: string
           embedding_vector_dimensions?: number
           id?: number
+          standards_settings?: Json | null
           updated_at?: string
           updated_by?: string | null
         }
@@ -910,6 +913,7 @@ export type Database = {
           created_by: string | null
           id: string
           label: string | null
+          metadata: Json | null
           source_id: string
           target_id: string
           type: Database["public"]["Enums"]["relationship_type"]
@@ -919,6 +923,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           label?: string | null
+          metadata?: Json | null
           source_id: string
           target_id: string
           type?: Database["public"]["Enums"]["relationship_type"]
@@ -928,6 +933,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           label?: string | null
+          metadata?: Json | null
           source_id?: string
           target_id?: string
           type?: Database["public"]["Enums"]["relationship_type"]
@@ -1378,7 +1384,15 @@ export type Database = {
           Args: Record<PropertyKey, never>
           Returns: Json
         }
+        get_admin_standards_settings: {
+          Args: Record<PropertyKey, never>
+          Returns: Json
+        }
         get_chat_runtime_settings: {
+          Args: Record<PropertyKey, never>
+          Returns: Json
+        }
+        get_standards_runtime_settings: {
           Args: Record<PropertyKey, never>
           Returns: Json
         }
@@ -1386,6 +1400,12 @@ export type Database = {
         Args: {
           _ontology_id: string
           _rows: Json
+        }
+        Returns: Json
+      }
+      update_admin_standards_settings: {
+        Args: {
+          _settings?: Json
         }
         Returns: Json
       }

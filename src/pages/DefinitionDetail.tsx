@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -49,6 +49,9 @@ import {
   canEditDefinition,
   canManageRelationships,
 } from "@/lib/authorization";
+import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
+import { useStandardsRuntimeSettings } from "@/hooks/use-standards-runtime-settings";
+import { evaluateDefinitionStandardsCompliance } from "@/lib/standards/compliance";
 
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -84,6 +87,7 @@ export default function DefinitionDetail() {
   const canManageDefinitionRelationships = canManageRelationships(role);
   const canAccessDefinitionWorkflow = canAccessWorkflow(role);
   const viewedDefinitionIdRef = useRef<string | null>(null);
+  const { settings: standardsSettings } = useStandardsRuntimeSettings();
 
   const fetchAll = async () => {
     if (!id) return;
@@ -96,7 +100,7 @@ export default function DefinitionDetail() {
     const [defRes, comRes, relRes, favRes, reviewRes, historyRes] = await Promise.all([
       supabase.from("definitions").select("*, ontologies(id, title)").eq("id", id).single(),
       supabase.from("comments").select("*").eq("definition_id", id).order("created_at", { ascending: true }),
-      supabase.from("relationships").select("id, source_id, target_id, type, label, source:source_id(id, title), target:target_id(id, title)").or(`source_id.eq.${id},target_id.eq.${id}`),
+      supabase.from("relationships").select("id, source_id, target_id, type, label, metadata, source:source_id(id, title), target:target_id(id, title)").or(`source_id.eq.${id},target_id.eq.${id}`),
       user ? supabase.from("favorites").select("id").eq("user_id", user.id).eq("definition_id", id).maybeSingle() : Promise.resolve({ data: null }),
       canAccessDefinitionWorkflow
         ? supabase
@@ -212,6 +216,38 @@ export default function DefinitionDetail() {
     }).catch(() => undefined);
   }, [definition?.id, definition?.title, user?.id]);
 
+  const definitionCompliance = useMemo(() => {
+    if (!definition || !standardsSettings) {
+      return {
+        findings: [],
+        relationSuggestions: [],
+        hasBlockingFindings: false,
+        summary: {
+          info: 0,
+          warning: 0,
+          error: 0,
+          blocking: 0,
+        },
+      };
+    }
+
+    return evaluateDefinitionStandardsCompliance({
+      ontologyId: definition.ontology_id,
+      ontologyTitle: definition.ontologies?.title,
+      definition: {
+        id: definition.id,
+        title: editing ? editData.title : definition.title,
+        description: editing ? editData.description : definition.description,
+        content: editing ? editData.content : definition.content,
+        example: editing ? editData.example : definition.example,
+        status: definition.status,
+        metadata: definition.metadata,
+        relationships,
+      },
+      settings: standardsSettings,
+    });
+  }, [definition, editData.content, editData.description, editData.example, editData.title, editing, relationships, standardsSettings]);
+
   const handleSave = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!definition || !editData.title.trim()) { toast.error("Title required"); return; }
@@ -233,6 +269,13 @@ export default function DefinitionDetail() {
           description: editData.description.trim(),
           content: editData.content.trim(),
           example: editData.example.trim(),
+        },
+        standards: {
+          ontologyId: definition.ontology_id,
+          ontologyTitle: definition.ontologies?.title,
+          status: definition.status,
+          metadata: definition.metadata,
+          relationships,
         },
       });
       toast.success("Definition updated");
@@ -351,7 +394,7 @@ export default function DefinitionDetail() {
             {editing ? (
               <div className="flex gap-2">
                 <Button variant="ghost" size="icon" onClick={() => setEditing(false)}><X className="h-4 w-4" /></Button>
-                <Button size="icon" onClick={handleSave} disabled={saving}>
+                <Button size="icon" aria-label="Save" onClick={handleSave} disabled={saving}>
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 </Button>
               </div>
@@ -470,6 +513,11 @@ export default function DefinitionDetail() {
                   )}
                 </CardContent>
               </Card>
+              <StandardsFindingsPanel
+                findings={definitionCompliance.findings}
+                summary={definitionCompliance.summary}
+                emptyMessage="No active standards findings for this definition."
+              />
             </TabsContent>
 
             {canAccessDefinitionWorkflow && (
@@ -583,6 +631,8 @@ export default function DefinitionDetail() {
 
           <DefinitionRelationsSection
             entityId={definition.id}
+            entityTitle={definition.title}
+            entityMetadata={definition.metadata}
             relationships={relationships}
             loading={relationshipsLoading}
             error={relationshipsError}

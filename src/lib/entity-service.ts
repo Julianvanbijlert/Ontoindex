@@ -2,8 +2,46 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { logActivityEvent } from "@/lib/history-service";
+import {
+  evaluateDefinitionStandardsCompliance,
+  StandardsBlockingFindingsError,
+} from "@/lib/standards/compliance";
+import type { StandardsRuntimeSettings } from "@/lib/standards/engine/types";
+import { fetchStandardsRuntimeSettings } from "@/lib/standards/settings-service";
 
 type AppSupabaseClient = SupabaseClient<Database>;
+
+interface DefinitionStandardsValidationInput {
+  ontologyId?: string | null;
+  ontologyTitle?: string | null;
+  settings?: StandardsRuntimeSettings;
+  status?: string | null;
+  metadata?: Database["public"]["Tables"]["definitions"]["Row"]["metadata"];
+  relationships?: Array<{
+    id: string;
+    source_id: string;
+    target_id: string;
+    type: string;
+    label?: string | null;
+    metadata?: Database["public"]["Tables"]["relationships"]["Row"]["metadata"];
+  }> | null;
+}
+
+interface DefinitionCreateInput {
+  ontologyId: string;
+  ontologyTitle?: string | null;
+  createdBy?: string | null;
+  definition: {
+    title: string;
+    description?: string | null;
+    content?: string | null;
+    example?: string | null;
+    priority?: Database["public"]["Enums"]["priority_level"] | null;
+    status?: Database["public"]["Enums"]["workflow_status"] | null;
+    metadata?: Database["public"]["Tables"]["definitions"]["Row"]["metadata"];
+  };
+  standards?: DefinitionStandardsValidationInput;
+}
 
 interface DefinitionUpdateInput {
   definitionId: string;
@@ -23,6 +61,7 @@ interface DefinitionUpdateInput {
     example?: string | null;
   };
   source?: "detail" | "graph";
+  standards?: DefinitionStandardsValidationInput;
 }
 
 interface OntologyUpdateInput {
@@ -86,7 +125,112 @@ function buildOntologyUpdateSummary(input: OntologyUpdateInput) {
     : `Saved ontology "${input.changes.title}".`;
 }
 
+async function ensureDefinitionSaveAllowed(client: AppSupabaseClient, input: {
+  definitionId: string;
+  title: string;
+  description?: string | null;
+  content?: string | null;
+  example?: string | null;
+  standards?: DefinitionStandardsValidationInput;
+}) {
+  if (!input.standards) {
+    return;
+  }
+
+  const settings = await fetchStandardsRuntimeSettings(client);
+
+  const compliance = evaluateDefinitionStandardsCompliance({
+    ontologyId: input.standards.ontologyId,
+    ontologyTitle: input.standards.ontologyTitle,
+    definition: {
+      id: input.definitionId,
+      title: input.title,
+      description: input.description,
+      content: input.content,
+      example: input.example,
+      status: input.standards.status,
+      metadata: input.standards.metadata,
+      relationships: input.standards.relationships,
+    },
+    settings,
+  });
+
+  if (compliance.hasBlockingFindings) {
+    throw new StandardsBlockingFindingsError(
+      "Resolve the blocking standards compliance issues before saving this definition.",
+      compliance,
+    );
+  }
+}
+
+export async function createDefinition(client: AppSupabaseClient, input: DefinitionCreateInput) {
+  await ensureDefinitionSaveAllowed(client, {
+    definitionId: `draft:${input.ontologyId}:${input.definition.title.trim().toLowerCase() || "definition"}`,
+    title: input.definition.title,
+    description: input.definition.description,
+    content: input.definition.content,
+    example: input.definition.example,
+    standards: input.standards
+      ? {
+          ...input.standards,
+          ontologyId: input.standards.ontologyId ?? input.ontologyId,
+          ontologyTitle: input.standards.ontologyTitle ?? input.ontologyTitle,
+          status: input.standards.status ?? input.definition.status,
+          metadata: input.standards.metadata ?? input.definition.metadata,
+        }
+      : undefined,
+  });
+
+  const { data, error } = await client
+    .from("definitions")
+    .insert({
+      title: input.definition.title,
+      description: input.definition.description || "",
+      content: input.definition.content || "",
+      example: input.definition.example || "",
+      ontology_id: input.ontologyId,
+      priority: input.definition.priority ?? "normal",
+      created_by: input.createdBy || null,
+      status: input.definition.status ?? "draft",
+      metadata: input.definition.metadata || null,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  await logActivityEvent(client, {
+    userId: input.createdBy,
+    action: "created",
+    entityType: "definition",
+    entityId: data.id,
+    entityTitle: data.title,
+    details: {
+      summary: `Created definition "${data.title}".`,
+      ontology_id: input.ontologyId,
+    },
+  });
+
+  return data;
+}
+
 export async function updateDefinition(client: AppSupabaseClient, input: DefinitionUpdateInput) {
+  await ensureDefinitionSaveAllowed(client, {
+    definitionId: input.definitionId,
+    title: input.changes.title,
+    description: input.changes.description,
+    content: input.changes.content,
+    example: input.changes.example,
+    standards: input.standards
+      ? {
+          ...input.standards,
+          metadata: input.standards.metadata ?? input.previous.metadata,
+        }
+      : undefined,
+  });
+
   await client.from("version_history").insert({
     definition_id: input.definitionId,
     version: input.previous.version || 1,

@@ -47,7 +47,7 @@ export function ExportDialog({ open, onOpenChange, ontologyId, ontologyTitle, en
     try {
       const exporter = ExportFactory.create(selectedFormat);
       const snapshot = await fetchOntologyExportSnapshot(supabase, ontologyId);
-      const result = await exporter.export(snapshot);
+      const result = await exporter.export(snapshot, supabase);
       const blob = typeof result.data === "string" ? new Blob([result.data], { type: result.mimeType }) : result.data;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -56,6 +56,9 @@ export function ExportDialog({ open, onOpenChange, ontologyId, ontologyTitle, en
       anchor.click();
       URL.revokeObjectURL(url);
       toast.success(`Exported ${snapshot.definitions.length} ${entityName} as ${exporter.label}`);
+      if (result.warnings.length > 0) {
+        toast.warning(`Export completed with ${result.warnings.length} standards warning(s).`);
+      }
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Export failed");

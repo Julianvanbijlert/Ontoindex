@@ -226,6 +226,53 @@ describe("validateStandardsModel", () => {
     ]));
   });
 
+  it("warns when NL-SBB concept relations use app-local semantics without explicit predicate mapping", () => {
+    const result = validateStandardsModel(createStandardsModel({
+      profiles: ["nl-sbb"],
+      conceptSchemes: [
+        {
+          id: "scheme-security",
+          label: "Security Vocabulary",
+          iri: "https://example.com/scheme/security",
+        },
+      ],
+      concepts: [
+        {
+          id: "concept-policy",
+          schemeId: "scheme-security",
+          prefLabel: "Access policy",
+          iri: "https://example.com/security#AccessPolicy",
+        },
+        {
+          id: "concept-control",
+          schemeId: "scheme-security",
+          prefLabel: "Control objective",
+          iri: "https://example.com/security#ControlObjective",
+        },
+      ],
+      conceptRelations: [
+        {
+          id: "relation-local",
+          sourceConceptId: "concept-policy",
+          targetConceptId: "concept-control",
+          kind: "custom",
+          predicateKey: "linked_to",
+        },
+      ],
+    }));
+
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profile: "nl-sbb",
+          code: "nl_sbb_unmapped_relation_semantics",
+          path: "conceptRelations[relation-local]",
+        }),
+      ]),
+    );
+  });
+
   it("passes valid RDF triple structures", () => {
     const result = validateStandardsModel(createStandardsModel({
       profiles: ["rdf"],

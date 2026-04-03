@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Json } from "@/integrations/supabase/types";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GitBranch, Plus, Trash2, Search, ArrowRight } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { emitAppDataChanged } from "@/lib/entity-events";
 import {
@@ -20,6 +21,9 @@ import {
   predefinedRelationshipTypes,
 } from "@/lib/relationship-service";
 import { canManageRelationships } from "@/lib/authorization";
+import { useStandardsRuntimeSettings } from "@/hooks/use-standards-runtime-settings";
+import { evaluateRelationshipStandardsCompliance } from "@/lib/standards/compliance";
+import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
 
 interface Relationship {
   id: string;
@@ -33,6 +37,8 @@ interface Relationship {
 
 interface RelationshipPanelProps {
   entityId: string;
+  entityTitle?: string;
+  entityMetadata?: Json | null;
   relationships: Relationship[];
   onRefresh: () => void;
   allowCreate?: boolean;
@@ -65,27 +71,68 @@ function getRelatedDefinition(relationship: Relationship, entityId: string) {
 
 export function RelationshipPanel({
   entityId,
+  entityTitle,
+  entityMetadata,
   relationships,
   onRefresh,
   allowCreate = true,
   onRelationClick,
 }: RelationshipPanelProps) {
   const { user, role } = useAuth();
+  const { settings } = useStandardsRuntimeSettings();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [targetSearch, setTargetSearch] = useState("");
   const [targetResults, setTargetResults] = useState<any[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<any>(null);
   const [relType, setRelType] = useState<string>(predefinedRelationshipTypes[0]);
   const [customRelationType, setCustomRelationType] = useState("");
+  const [selectedSuggestionMetadata, setSelectedSuggestionMetadata] = useState<Json | null>(null);
   const [creating, setCreating] = useState(false);
   const canMutateRelationships = allowCreate && canManageRelationships(role);
+  const relationshipCompliance = useMemo(
+    () => {
+      if (!settings) {
+        return {
+          findings: [],
+          relationSuggestions: [],
+          hasBlockingFindings: false,
+          summary: {
+            info: 0,
+            warning: 0,
+            error: 0,
+            blocking: 0,
+          },
+        };
+      }
+
+      return evaluateRelationshipStandardsCompliance({
+        sourceDefinition: {
+          id: entityId,
+          title: entityTitle || "Source definition",
+          metadata: entityMetadata,
+        },
+        targetDefinition: selectedTarget
+          ? {
+              id: selectedTarget.id,
+              title: selectedTarget.title,
+              metadata: selectedTarget.metadata,
+            }
+          : null,
+        selectedType: relType,
+        customType: customRelationType,
+        relationshipMetadata: selectedSuggestionMetadata,
+        settings,
+      });
+    },
+    [customRelationType, entityId, entityMetadata, entityTitle, relType, selectedSuggestionMetadata, selectedTarget, settings],
+  );
 
   useEffect(() => {
     if (!targetSearch.trim()) { setTargetResults([]); return; }
     const timeout = setTimeout(async () => {
       const { data } = await supabase
         .from("definitions")
-        .select("id, title")
+        .select("id, title, metadata")
         .ilike("title", `%${targetSearch}%`)
         .neq("id", entityId)
         .limit(8);
@@ -114,12 +161,24 @@ export function RelationshipPanel({
         selectedType: relType as any,
         customType: customRelationType,
         createdBy: user.id,
+        metadata: selectedSuggestionMetadata || undefined,
+        standards: {
+          sourceDefinition: {
+            title: entityTitle,
+            metadata: entityMetadata,
+          },
+          targetDefinition: {
+            title: selectedTarget.title,
+            metadata: selectedTarget.metadata,
+          },
+        },
       });
       toast.success("Relationship added");
       setDialogOpen(false);
       setSelectedTarget(null);
       setTargetSearch("");
       setCustomRelationType("");
+      setSelectedSuggestionMetadata(null);
       setRelType(predefinedRelationshipTypes[0]);
       emitAppDataChanged({ entityType: "relationship", action: "created", entityId: selectedTarget.id });
       onRefresh();
@@ -163,12 +222,22 @@ export function RelationshipPanel({
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">{relationships.length} relationship{relationships.length !== 1 ? "s" : ""}</p>
         {canMutateRelationships && (
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={dialogOpen} onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) {
+              setSelectedSuggestionMetadata(null);
+            }
+          }}>
             <DialogTrigger asChild>
               <Button size="sm" variant="outline"><Plus className="h-3 w-3 mr-1.5" />Add Relationship</Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
-              <DialogHeader><DialogTitle>Add Relationship</DialogTitle></DialogHeader>
+              <DialogHeader>
+                <DialogTitle>Add Relationship</DialogTitle>
+                <DialogDescription>
+                  Create a relationship to another definition. Standards suggestions are shown when they are available.
+                </DialogDescription>
+              </DialogHeader>
               <div className="space-y-4 mt-2">
                 <div className="space-y-2">
                   <Label>Target Definition</Label>
@@ -198,7 +267,10 @@ export function RelationshipPanel({
                 </div>
                 <div className="space-y-2">
                   <Label>Relationship Type</Label>
-                  <Select value={relType} onValueChange={setRelType}>
+                  <Select value={relType} onValueChange={(value) => {
+                    setRelType(value);
+                    setSelectedSuggestionMetadata(null);
+                  }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {predefinedRelationshipTypes.map(t => (
@@ -207,14 +279,60 @@ export function RelationshipPanel({
                       <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Prefer a suggested standards-aligned relation when possible, or switch to a custom type.
+                  </p>
                   {relType === CUSTOM_RELATION_TYPE && (
                     <Input
                       placeholder="Enter a custom relation type"
                       value={customRelationType}
-                      onChange={e => setCustomRelationType(e.target.value)}
+                      onChange={e => {
+                        setCustomRelationType(e.target.value);
+                        setSelectedSuggestionMetadata(null);
+                      }}
                     />
                   )}
                 </div>
+                {relationshipCompliance.relationSuggestions.length > 0 && (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Suggested compliant relations</p>
+                      <p className="text-xs text-muted-foreground">
+                        Choose a recommended relation or keep the custom option if you need something else.
+                      </p>
+                    </div>
+                    <div className="grid gap-2">
+                      {relationshipCompliance.relationSuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion.id}
+                          type="button"
+                          className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/50"
+                          onClick={() => {
+                            setRelType(suggestion.selectedType);
+                            setCustomRelationType(suggestion.customType || "");
+                            setSelectedSuggestionMetadata(suggestion.metadata || null);
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-foreground">{suggestion.label}</p>
+                            <Badge variant="outline" className="bg-background/70 text-[10px]">
+                              {suggestion.standardId}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{suggestion.explanation}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {relationshipCompliance.findings.length > 0 && (
+                  <StandardsFindingsPanel
+                    title="Current relationship findings"
+                    findings={relationshipCompliance.findings}
+                    summary={relationshipCompliance.summary}
+                    emptyMessage="No active standards findings for this relationship."
+                  />
+                )}
                 <Button onClick={handleCreate} className="w-full" disabled={!selectedTarget || creating}>
                   Add Relationship
                 </Button>

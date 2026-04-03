@@ -1,9 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { Json } from "@/integrations/supabase/types";
 import type { Database } from "@/integrations/supabase/types";
-import { buildRelationshipPayload } from "@/lib/relationship-service";
+import type { StandardsFinding } from "@/lib/standards/engine/types";
+import {
+  buildRelationshipPayload,
+  CUSTOM_RELATION_TYPE,
+  predefinedRelationshipTypes,
+  type PredefinedRelationshipType,
+  type RelationshipSelection,
+} from "@/lib/relationship-service";
 import { ImportFactory, supportedImportColumns, type ParsedImportBundle, type ParsedImportRow } from "@/lib/import-factory";
 import { extractErrorMessage, normalizeSearchSyncErrorMessage } from "@/lib/search-index-errors";
+import {
+  evaluateStandardsModelCompliance,
+  formatStandardsFindingsAsWarnings,
+} from "@/lib/standards/compliance";
+import { fetchStandardsRuntimeSettings } from "@/lib/standards/settings-service";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
@@ -12,6 +25,7 @@ export interface ImportResult {
   imported: number;
   errors: string[];
   warnings: string[];
+  standardsFindings: StandardsFinding[];
   errorCount: number;
   warningCount: number;
 }
@@ -19,7 +33,7 @@ export interface ImportResult {
 export const REQUIRED_IMPORT_REQUIREMENTS = ["title", "description or context"];
 export const SUPPORTED_IMPORT_COLUMNS = supportedImportColumns;
 
-function buildResult(params: Pick<ImportResult, "success" | "imported" | "errors" | "warnings">): ImportResult {
+function buildResult(params: Pick<ImportResult, "success" | "imported" | "errors" | "warnings" | "standardsFindings">): ImportResult {
   return {
     ...params,
     errorCount: params.errors.length,
@@ -33,6 +47,91 @@ function normalizeImportFailureMessage(error: unknown) {
 
 function hasPersistableRowMetadata(rows: ParsedImportRow[]) {
   return rows.some((row) => row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPredefinedRelationshipType(value: string): value is PredefinedRelationshipType {
+  return predefinedRelationshipTypes.includes(value as PredefinedRelationshipType);
+}
+
+function readRelationStandardsMetadata(metadata: Json | undefined) {
+  if (!isRecord(metadata)) {
+    return null;
+  }
+
+  const standards = metadata.standards;
+
+  if (!isRecord(standards)) {
+    return null;
+  }
+
+  const relation = standards.relation;
+  return isRecord(relation) ? relation : null;
+}
+
+function toRelationshipSelection(input: {
+  type: string;
+  label?: string;
+  metadata?: Json;
+}): { selectedType: RelationshipSelection; customType?: string } {
+  const relationMetadata = readRelationStandardsMetadata(input.metadata);
+  const semanticKind = typeof relationMetadata?.kind === "string" ? relationMetadata.kind.trim().toLowerCase() : "";
+  const normalizedType = input.type.trim().toLowerCase();
+
+  if (isPredefinedRelationshipType(normalizedType)) {
+    return {
+      selectedType: normalizedType,
+    };
+  }
+
+  if (semanticKind === "broader" || normalizedType === "broader") {
+    return {
+      selectedType: "is_a",
+    };
+  }
+
+  if (semanticKind === "related" || normalizedType === "related") {
+    return {
+      selectedType: "related_to",
+    };
+  }
+
+  if (semanticKind === "narrower" || normalizedType === "narrower") {
+    return {
+      selectedType: CUSTOM_RELATION_TYPE,
+      customType: input.label?.trim() || "narrower",
+    };
+  }
+
+  return {
+    selectedType: CUSTOM_RELATION_TYPE,
+    customType: input.label?.trim() || input.type,
+  };
+}
+
+async function buildImportStandardsWarnings(
+  client: AppSupabaseClient,
+  bundle: ParsedImportBundle,
+) {
+  if (!bundle.standardsModel) {
+    return {
+      warnings: [] as string[],
+      findings: [] as StandardsFinding[],
+      hasBlockingFindings: false,
+    };
+  }
+
+  const settings = await fetchStandardsRuntimeSettings(client);
+  const compliance = evaluateStandardsModelCompliance(bundle.standardsModel, settings);
+
+  return {
+    warnings: formatStandardsFindingsAsWarnings(compliance),
+    findings: compliance.findings,
+    hasBlockingFindings: compliance.hasBlockingFindings,
+  };
 }
 
 export async function parseImportFile(file: File) {
@@ -105,13 +204,19 @@ async function directPersistImportBundle(
           );
           return null;
         }
+        const relationshipSelection = toRelationshipSelection({
+          type: relationship.type,
+          label: relationship.label,
+          metadata: relationship.metadata,
+        });
 
         return buildRelationshipPayload({
           sourceId,
           targetId,
-          selectedType: "related_to",
-          customType: relationship.label || relationship.type,
+          selectedType: relationshipSelection.selectedType,
+          customType: relationshipSelection.customType,
           createdBy: user.id,
+          metadata: relationship.metadata,
         });
       })
       .filter(Boolean);
@@ -173,6 +278,15 @@ export async function importDefinitionsToOntology(
 ) {
   try {
     const bundle = await parseImportFile(file);
+    const standardsValidation = await buildImportStandardsWarnings(client, bundle);
+
+    if (standardsValidation.hasBlockingFindings) {
+      throw new Error("Import blocked by a blocking standards compliance issue.");
+    }
+
+    if (bundle.rows.length === 0) {
+      throw new Error("No valid rows were found to import.");
+    }
 
     try {
       if (bundle.relationships.length === 0 && !hasPersistableRowMetadata(bundle.rows)) {
@@ -182,7 +296,8 @@ export async function importDefinitionsToOntology(
           success: true,
           imported: rpcResult.importedCount ?? bundle.rows.length,
           errors: [],
-          warnings: [...bundle.warnings, ...(rpcResult.warnings || [])],
+          warnings: [...bundle.warnings, ...standardsValidation.warnings, ...(rpcResult.warnings || [])],
+          standardsFindings: standardsValidation.findings,
         });
       }
 
@@ -205,7 +320,8 @@ export async function importDefinitionsToOntology(
       success: true,
       imported: bundle.rows.length,
       errors: [],
-      warnings: [...bundle.warnings, ...relationshipWarnings],
+      warnings: [...bundle.warnings, ...standardsValidation.warnings, ...relationshipWarnings],
+      standardsFindings: standardsValidation.findings,
     });
   } catch (error) {
     return buildResult({
@@ -213,6 +329,7 @@ export async function importDefinitionsToOntology(
       imported: 0,
       errors: [normalizeImportFailureMessage(error)],
       warnings: [],
+      standardsFindings: [],
     });
   }
 }

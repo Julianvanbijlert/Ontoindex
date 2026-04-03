@@ -1,3 +1,4 @@
+import type { Json } from "@/integrations/supabase/types";
 import { AlertCircle, GitBranch } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -7,6 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 interface DefinitionRelationsSectionProps {
   entityId: string;
+  entityTitle?: string;
+  entityMetadata?: Json | null;
   relationships: any[];
   loading: boolean;
   error?: string | null;
@@ -16,6 +19,8 @@ interface DefinitionRelationsSectionProps {
 
 export function DefinitionRelationsSection({
   entityId,
+  entityTitle,
+  entityMetadata,
   relationships,
   loading,
   error,
@@ -46,6 +51,8 @@ export function DefinitionRelationsSection({
         ) : (
           <RelationshipPanel
             entityId={entityId}
+            entityTitle={entityTitle}
+            entityMetadata={entityMetadata}
             relationships={relationships}
             onRefresh={onRefresh}
             allowCreate={allowCreate}

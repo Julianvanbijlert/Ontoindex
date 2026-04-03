@@ -10,13 +10,19 @@ const authState = {
   role: "viewer",
 };
 
-const {
-  createRelationshipRecordMock,
-  updateDefinitionMock,
-  mockDefinitionsData,
-} = vi.hoisted(() => ({
-  createRelationshipRecordMock: vi.fn(),
-  updateDefinitionMock: vi.fn(),
+const useStandardsRuntimeSettings = vi.fn();
+const evaluateOntologyStandardsCompliance = vi.fn();
+const evaluateRelationshipStandardsCompliance = vi.fn();
+
+  const {
+    createDefinitionMock,
+    createRelationshipRecordMock,
+    updateDefinitionMock,
+    mockDefinitionsData,
+  } = vi.hoisted(() => ({
+    createDefinitionMock: vi.fn(),
+    createRelationshipRecordMock: vi.fn(),
+    updateDefinitionMock: vi.fn(),
   mockDefinitionsData: [
     {
       id: "def-1",
@@ -65,6 +71,15 @@ vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => authState,
 }));
 
+vi.mock("@/hooks/use-standards-runtime-settings", () => ({
+  useStandardsRuntimeSettings: () => useStandardsRuntimeSettings(),
+}));
+
+vi.mock("@/lib/standards/compliance", () => ({
+  evaluateOntologyStandardsCompliance: (...args: unknown[]) => evaluateOntologyStandardsCompliance(...args),
+  evaluateRelationshipStandardsCompliance: (...args: unknown[]) => evaluateRelationshipStandardsCompliance(...args),
+}));
+
 vi.mock("@/components/shared/LikeButton", () => ({
   LikeButton: () => <div>LikeButton</div>,
 }));
@@ -109,6 +124,7 @@ vi.mock("@/lib/relationship-service", () => ({
 }));
 
 vi.mock("@/lib/entity-service", () => ({
+  createDefinition: createDefinitionMock,
   deleteOntology: vi.fn(),
   updateOntology: vi.fn(),
   updateDefinition: updateDefinitionMock,
@@ -237,7 +253,28 @@ describe("OntologyDetail", () => {
       });
     authState.role = "viewer";
     createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
     updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["mim", "nl-sbb", "rdf"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
     renderPage();
 
     await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
@@ -295,7 +332,28 @@ describe("OntologyDetail", () => {
       });
     authState.role = "editor";
     createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
     updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["mim", "nl-sbb", "rdf"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
     createRelationshipRecordMock.mockResolvedValue({
       id: "rel-2",
       source_id: "def-1",
@@ -304,6 +362,10 @@ describe("OntologyDetail", () => {
       label: null,
     });
     updateDefinitionMock.mockResolvedValue({});
+    createDefinitionMock.mockResolvedValue({
+      id: "def-3",
+      title: "New Definition",
+    });
     renderPage();
 
     await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
@@ -389,6 +451,26 @@ describe("OntologyDetail", () => {
     authState.role = "viewer";
     createRelationshipRecordMock.mockReset();
     updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["mim", "nl-sbb", "rdf"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
     renderPage();
 
     await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
@@ -411,6 +493,26 @@ describe("OntologyDetail", () => {
     authState.role = "viewer";
     createRelationshipRecordMock.mockReset();
     updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["mim", "nl-sbb", "rdf"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
     renderPage();
 
     await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
@@ -422,5 +524,251 @@ describe("OntologyDetail", () => {
 
     expect(screen.queryByRole("button", { name: "Ontology" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "UML" })).not.toBeInTheDocument();
+  });
+
+  it("persists suggestion metadata from the graph dialog when a standards suggestion is selected", async () => {
+    mockDefinitionsData.splice(0, mockDefinitionsData.length,
+      {
+        id: "def-1",
+        title: "Access Policy",
+        description: "Definition",
+        content: "Definition content",
+        example: "",
+        metadata: {},
+        version: 1,
+        status: "approved",
+        relationships: [
+          {
+            id: "rel-1",
+            source_id: "def-1",
+            target_id: "def-2",
+            type: "related_to",
+            label: null,
+            target: { id: "def-2", title: "Control Objective" },
+          },
+        ],
+      },
+      {
+        id: "def-2",
+        title: "Control Objective",
+        description: "Second definition",
+        content: "Control content",
+        example: "",
+        metadata: {},
+        version: 2,
+        status: "draft",
+        relationships: [],
+      });
+    authState.role = "editor";
+    createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
+    updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["nl-sbb"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [
+        {
+          id: "suggestion-narrower",
+          standardId: "nl-sbb",
+          label: "Use narrower",
+          explanation: "Preserve SKOS narrower semantics.",
+          selectedType: "__custom__",
+          customType: "narrower",
+          metadata: {
+            standards: {
+              relation: {
+                kind: "narrower",
+                predicateKey: "narrower",
+                predicateIri: "http://www.w3.org/2004/02/skos/core#narrower",
+              },
+            },
+          },
+        },
+      ],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    createRelationshipRecordMock.mockResolvedValue({
+      id: "rel-2",
+      source_id: "def-1",
+      target_id: "def-2",
+      type: "related_to",
+      label: "narrower",
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
+    const graphTab = screen.getByRole("tab", { name: "Graph" });
+    fireEvent.mouseDown(graphTab, { button: 0 });
+    fireEvent.mouseUp(graphTab, { button: 0 });
+    fireEvent.click(graphTab);
+    await waitFor(() => expect(graphTab).toHaveAttribute("data-state", "active"));
+
+    fireEvent.click(screen.getByRole("button", { name: "simulate-connect" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /use narrower/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create relationship/i }));
+
+    await waitFor(() =>
+      expect(createRelationshipRecordMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          selectedType: "__custom__",
+          customType: "narrower",
+          metadata: expect.objectContaining({
+            standards: expect.objectContaining({
+              relation: expect.objectContaining({
+                kind: "narrower",
+                predicateIri: "http://www.w3.org/2004/02/skos/core#narrower",
+              }),
+            }),
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("blocks shared definition creation when the standards service rejects the draft", async () => {
+    mockDefinitionsData.splice(0, mockDefinitionsData.length,
+      {
+        id: "def-1",
+        title: "Access Policy",
+        description: "Definition",
+        content: "Definition content",
+        example: "",
+        metadata: {},
+        version: 1,
+        status: "approved",
+        relationships: [],
+      });
+    authState.role = "editor";
+    createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
+    updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["nl-sbb"],
+        ruleOverrides: {
+          nl_sbb_invalid_concept_iri: "blocking",
+        },
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    createDefinitionMock.mockRejectedValueOnce(new Error("Resolve the blocking standards compliance issues before saving this definition."));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /add definition/i }));
+    fireEvent.change(screen.getByPlaceholderText("Definition title"), {
+      target: { value: "Invalid Definition" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create definition$/i }));
+
+    await waitFor(() => expect(createDefinitionMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("blocks graph rename saves when shared standards validation rejects the change", async () => {
+    mockDefinitionsData.splice(0, mockDefinitionsData.length,
+      {
+        id: "def-1",
+        title: "Access Policy",
+        description: "Definition",
+        content: "Definition content",
+        example: "",
+        metadata: {},
+        version: 1,
+        status: "approved",
+        relationships: [
+          {
+            id: "rel-1",
+            source_id: "def-1",
+            target_id: "def-2",
+            type: "related_to",
+            label: null,
+            target: { id: "def-2", title: "Control Objective" },
+          },
+        ],
+      },
+      {
+        id: "def-2",
+        title: "Control Objective",
+        description: "Second definition",
+        content: "Control content",
+        example: "",
+        metadata: {},
+        version: 2,
+        status: "draft",
+        relationships: [],
+      });
+    authState.role = "editor";
+    createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
+    updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["nl-sbb"],
+        ruleOverrides: {
+          nl_sbb_invalid_concept_iri: "blocking",
+        },
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    updateDefinitionMock.mockRejectedValueOnce(new Error("Resolve the blocking standards compliance issues before saving this definition."));
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
+    const graphTab = screen.getByRole("tab", { name: "Graph" });
+    fireEvent.mouseDown(graphTab, { button: 0 });
+    fireEvent.mouseUp(graphTab, { button: 0 });
+    fireEvent.click(graphTab);
+    await waitFor(() => expect(graphTab).toHaveAttribute("data-state", "active"));
+
+    fireEvent.click(screen.getByRole("button", { name: "simulate-double-click" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Access Policy")).toBeInTheDocument());
+    fireEvent.change(screen.getByDisplayValue("Access Policy"), { target: { value: "Blocked Rename" } });
+    fireEvent.click(screen.getByRole("button", { name: /save definition name/i }));
+
+    await waitFor(() => expect(updateDefinitionMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByDisplayValue("Blocked Rename")).toBeInTheDocument();
   });
 });

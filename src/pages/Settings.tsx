@@ -6,11 +6,16 @@ import {
   updateAdminChatSettings,
 } from "@/lib/chat-admin-settings-service";
 import {
+  fetchAdminStandardsSettings,
+  updateAdminStandardsSettings,
+} from "@/lib/standards/settings-service";
+import {
   defaultLlmBaseUrlForProvider,
   defaultLlmModelForProvider,
 } from "@/lib/chat/provider-config";
 import { defaultEmbeddingBaseUrlForProvider } from "@/lib/ai/provider-factory";
 import type { AdminChatSettings } from "@/lib/chat/types";
+import type { StandardsRuntimeSettings, StandardsSeverity } from "@/lib/standards/engine/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -20,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { canManageUsers } from "@/lib/authorization";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { builtInStandardsPacks, listStandardsRuleCatalog } from "@/lib/standards/engine/registry";
 
 function parseNumericInput(value: string, fallback: number) {
   const parsed = Number(value);
@@ -33,6 +39,11 @@ export default function Settings() {
   const [chatSettingsLoading, setChatSettingsLoading] = useState(false);
   const [chatSettingsSaving, setChatSettingsSaving] = useState(false);
   const [chatSettingsError, setChatSettingsError] = useState<string | null>(null);
+  const [standardsSettings, setStandardsSettings] = useState<StandardsRuntimeSettings | null>(null);
+  const [standardsSettingsLoading, setStandardsSettingsLoading] = useState(false);
+  const [standardsSettingsSaving, setStandardsSettingsSaving] = useState(false);
+  const [standardsSettingsError, setStandardsSettingsError] = useState<string | null>(null);
+  const [activeSeverityRuleId, setActiveSeverityRuleId] = useState<string | null>(null);
   const [deepseekApiKeyDraft, setDeepseekApiKeyDraft] = useState("");
   const [geminiApiKeyDraft, setGeminiApiKeyDraft] = useState("");
   const [huggingFaceApiKeyDraft, setHuggingFaceApiKeyDraft] = useState("");
@@ -44,16 +55,20 @@ export default function Settings() {
     group_by_preference: profile?.group_by_preference || "name",
   });
   const canManageChatSettings = canManageUsers(role);
+  const standardsRuleCatalog = listStandardsRuleCatalog();
 
   useEffect(() => {
     if (!canManageChatSettings) {
       setChatSettings(null);
       setChatSettingsError(null);
+      setStandardsSettings(null);
+      setStandardsSettingsError(null);
       return;
     }
 
     let active = true;
     setChatSettingsLoading(true);
+    setStandardsSettingsLoading(true);
     fetchAdminChatSettings(supabase)
       .then((settings) => {
         if (active) {
@@ -71,6 +86,25 @@ export default function Settings() {
       .finally(() => {
         if (active) {
           setChatSettingsLoading(false);
+        }
+      });
+    fetchAdminStandardsSettings(supabase)
+      .then((settings) => {
+        if (active) {
+          setStandardsSettings(settings);
+          setStandardsSettingsError(null);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          const message = error instanceof Error ? error.message : "Unable to load standards settings.";
+          setStandardsSettingsError(message);
+          toast.error(message);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setStandardsSettingsLoading(false);
         }
       });
 
@@ -200,6 +234,52 @@ export default function Settings() {
     }
   };
 
+  const handleSaveStandardsSettings = async () => {
+    if (!standardsSettings) {
+      return;
+    }
+
+    setStandardsSettingsSaving(true);
+    try {
+      const updated = await updateAdminStandardsSettings(supabase, standardsSettings);
+      setStandardsSettings(updated);
+      setStandardsSettingsError(null);
+      toast.success("Standards settings saved");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to save standards settings.";
+      setStandardsSettingsError(message);
+      toast.error(message);
+    } finally {
+      setStandardsSettingsSaving(false);
+    }
+  };
+
+  const toggleStandard = (standardId: string, enabled: boolean) => {
+    setStandardsSettings((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        enabledStandards: enabled
+          ? [...new Set([...current.enabledStandards, standardId])]
+          : current.enabledStandards.filter((item) => item !== standardId),
+      };
+    });
+  };
+
+  const updateRuleSeverity = (ruleId: string, severity: StandardsSeverity) => {
+    setStandardsSettings((current) => current ? ({
+      ...current,
+      ruleOverrides: {
+        ...current.ruleOverrides,
+        [ruleId]: severity,
+      },
+    }) : current);
+    setActiveSeverityRuleId(null);
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold text-foreground tracking-tight">Settings</h1>
@@ -267,6 +347,114 @@ export default function Settings() {
           </Button>
         </CardContent>
       </Card>
+
+      {canManageChatSettings && (
+        <Card className="border-border/50">
+          <CardHeader>
+            <CardTitle className="text-base">Standards Compliance</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {standardsSettingsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading standards settings...
+              </div>
+            ) : standardsSettings ? (
+              <>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium">Enabled standards</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Standards are global for now. Ontology-scoped standards selection is intentionally deferred until the repository has a clean project-scoped settings model.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {builtInStandardsPacks.map((pack) => (
+                    <label key={pack.standardId} className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2 text-sm">
+                      <div>
+                        <p className="font-medium text-foreground">{pack.label}</p>
+                        <p className="text-xs text-muted-foreground">{pack.description}</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-label={`Enable ${pack.label}`}
+                        aria-checked={standardsSettings.enabledStandards.includes(pack.standardId)}
+                        className="inline-flex h-9 min-w-16 items-center justify-center rounded-md border border-input bg-background px-3 text-sm"
+                        onClick={() => toggleStandard(
+                          pack.standardId,
+                          !standardsSettings.enabledStandards.includes(pack.standardId),
+                        )}
+                      >
+                        {standardsSettings.enabledStandards.includes(pack.standardId) ? "On" : "Off"}
+                      </button>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="space-y-1 border-t border-border/50 pt-4">
+                  <h3 className="text-sm font-medium">Rule severities</h3>
+                  <p className="text-xs text-muted-foreground">
+                    The shipped defaults are mostly warnings. Raise individual rules to error or blocking if your governance process needs stricter enforcement.
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  {standardsRuleCatalog.map((rule) => {
+                    const currentSeverity = standardsSettings.ruleOverrides[rule.ruleId] || rule.defaultSeverity;
+                    const menuOpen = activeSeverityRuleId === rule.ruleId;
+
+                    return (
+                      <div key={rule.ruleId} className="rounded-lg border border-border/50 p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium text-foreground">{rule.title}</p>
+                            <p className="text-xs text-muted-foreground">{rule.description}</p>
+                          </div>
+                          <div className="space-y-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              aria-label={`${rule.title} severity`}
+                              onClick={() => setActiveSeverityRuleId((current) => current === rule.ruleId ? null : rule.ruleId)}
+                            >
+                              {currentSeverity}
+                            </Button>
+                            {menuOpen && (
+                              <div className="flex flex-wrap gap-2">
+                                {(["info", "warning", "error", "blocking"] as const).map((severity) => (
+                                  <Button
+                                    key={severity}
+                                    type="button"
+                                    variant={currentSeverity === severity ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => updateRuleSeverity(rule.ruleId, severity)}
+                                  >
+                                    {severity}
+                                  </Button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {standardsSettingsError && (
+                  <p className="text-sm text-destructive">{standardsSettingsError}</p>
+                )}
+
+                <Button onClick={handleSaveStandardsSettings} disabled={standardsSettingsSaving}>
+                  {standardsSettingsSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save Standards Settings
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm text-destructive">{standardsSettingsError || "Unable to load standards settings."}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {canManageChatSettings && (
         <Card className="border-border/50">

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database, Json } from "@/integrations/supabase/types";
 import { getRelationshipDisplayLabel } from "@/lib/relationship-service";
+import type { StandardsFinding } from "@/lib/standards/engine/types";
 import { mapOntologyToStandardsModel } from "@/lib/standards/mappers/ontology-to-standards";
 import type {
   StandardsConcept,
@@ -14,6 +15,11 @@ import type {
   StandardsResourceTerm,
   StandardsTriple,
 } from "@/lib/standards/model";
+import {
+  evaluateStandardsModelCompliance,
+  formatStandardsFindingsAsWarnings,
+} from "@/lib/standards/compliance";
+import { fetchStandardsRuntimeSettings } from "@/lib/standards/settings-service";
 
 type AppSupabaseClient = SupabaseClient<Database>;
 
@@ -21,6 +27,7 @@ export interface ExportableRelationship {
   id: string;
   type: string;
   label?: string | null;
+  metadata?: Json;
   targetId: string;
   targetTitle: string;
 }
@@ -58,6 +65,8 @@ export interface ExportResult {
   filename: string;
   mimeType: string;
   extension: string;
+  warnings: string[];
+  standardsFindings: StandardsFinding[];
 }
 
 export interface Exporter {
@@ -65,7 +74,7 @@ export interface Exporter {
   label: string;
   extension: string;
   mimeType: string;
-  export(snapshot: OntologyExportSnapshot): Promise<ExportResult>;
+  export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult>;
 }
 
 function slugify(value: string) {
@@ -128,15 +137,53 @@ function mapSnapshotToStandardsModel(snapshot: OntologyExportSnapshot): Standard
         target_id: relationship.targetId,
         type: relationship.type,
         label: relationship.label,
+        metadata: relationship.metadata,
       })),
     })),
   });
+}
+
+async function buildStandardsExportWarnings(
+  client: AppSupabaseClient,
+  snapshot: OntologyExportSnapshot,
+  model: StandardsModel,
+) {
+  const canonicalTripleModel: StandardsModel = {
+    ...model,
+    triples: [
+      ...model.triples,
+      ...mapCanonicalTriplesToStandardsTriples(buildCanonicalTriples(snapshot, model)),
+    ],
+  };
+  const settings = await fetchStandardsRuntimeSettings(client);
+  const compliance = evaluateStandardsModelCompliance(canonicalTripleModel, settings);
+
+  if (compliance.hasBlockingFindings) {
+    throw new Error("Export blocked by a blocking standards compliance issue.");
+  }
+
+  return {
+    warnings: formatStandardsFindingsAsWarnings(compliance),
+    findings: compliance.findings,
+  };
 }
 
 interface CanonicalExportTriple {
   subject: StandardsResourceTerm;
   predicate: string;
   object: StandardsObjectTerm;
+}
+
+function mapCanonicalTriplesToStandardsTriples(triples: CanonicalExportTriple[]): StandardsTriple[] {
+  return triples.map((triple, index) => ({
+    id: `canonical-export-triple-${index + 1}`,
+    subject: triple.subject,
+    predicate: {
+      termType: "iri",
+      value: triple.predicate,
+    },
+    object: triple.object,
+  }));
 }
 
 function getSchemeIri(snapshot: OntologyExportSnapshot, scheme: StandardsConceptScheme) {
@@ -561,6 +608,16 @@ function mapDefinitionsToRows(snapshot: OntologyExportSnapshot) {
     related_relationships: definition.relationships
       .map((relationship) => `${getRelationshipDisplayLabel(relationship.type, relationship.label)} -> ${relationship.targetTitle}`)
       .join(" | "),
+    metadata: JSON.stringify(definition.metadata || {}),
+    related_relationships_metadata: JSON.stringify(
+      definition.relationships.map((relationship) => ({
+        targetRef: relationship.targetTitle,
+        targetId: relationship.targetId,
+        type: relationship.type,
+        label: relationship.label || undefined,
+        metadata: relationship.metadata || undefined,
+      })),
+    ),
     updated_at: definition.updatedAt,
     view_count: definition.viewCount,
   }));
@@ -574,6 +631,8 @@ function createStringResult(
   snapshot: OntologyExportSnapshot,
   exporter: Pick<Exporter, "extension" | "mimeType">,
   data: string,
+  warnings: string[] = [],
+  standardsFindings: StandardsFinding[] = [],
 ): ExportResult {
   return {
     success: true,
@@ -581,6 +640,8 @@ function createStringResult(
     filename: buildFilename(snapshot, exporter.extension),
     mimeType: exporter.mimeType,
     extension: exporter.extension,
+    warnings,
+    standardsFindings,
   };
 }
 
@@ -602,7 +663,9 @@ class CSVExporter implements Exporter {
   extension = "csv";
   mimeType = "text/csv;charset=utf-8";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
     const rows = mapDefinitionsToRows(snapshot);
     const headers = Object.keys(rows[0] || {
       id: "",
@@ -615,6 +678,8 @@ class CSVExporter implements Exporter {
       tags: "",
       related_definitions: "",
       related_relationships: "",
+      metadata: "",
+      related_relationships_metadata: "",
       updated_at: "",
       view_count: "",
     });
@@ -623,7 +688,7 @@ class CSVExporter implements Exporter {
       ...rows.map((row) => headers.map((header) => escapeCsv((row as Record<string, unknown>)[header])).join(",")),
     ].join("\n");
 
-    return createStringResult(snapshot, this, csv);
+    return createStringResult(snapshot, this, csv, standardsValidation.warnings, standardsValidation.findings);
   }
 }
 
@@ -633,7 +698,9 @@ class ExcelExporter implements Exporter {
   extension = "xlsx";
   mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
+    const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
     const workbook = utils.book_new();
     const definitionsSheet = utils.json_to_sheet(mapDefinitionsToRows(snapshot));
     const ontologySheet = utils.json_to_sheet([
@@ -659,6 +726,8 @@ class ExcelExporter implements Exporter {
       filename: buildFilename(snapshot, this.extension),
       mimeType: this.mimeType,
       extension: this.extension,
+      warnings: standardsValidation.warnings,
+      standardsFindings: standardsValidation.findings,
     };
   }
 }
@@ -669,10 +738,11 @@ class TurtleExporter implements Exporter {
   extension = "ttl";
   mimeType = "text/turtle;charset=utf-8";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
     const triples = buildCanonicalTriples(snapshot, standardsModel);
-    return createStringResult(snapshot, this, serializeTurtle(triples));
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
+    return createStringResult(snapshot, this, serializeTurtle(triples), standardsValidation.warnings, standardsValidation.findings);
   }
 }
 
@@ -682,9 +752,10 @@ class JsonLdExporter implements Exporter {
   extension = "jsonld";
   mimeType = "application/ld+json";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
     const graph = buildJsonLdGraph(snapshot, standardsModel);
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
 
     return createStringResult(
       snapshot,
@@ -702,6 +773,8 @@ class JsonLdExporter implements Exporter {
         null,
         2,
       ),
+      standardsValidation.warnings,
+      standardsValidation.findings,
     );
   }
 }
@@ -712,9 +785,16 @@ class NTriplesExporter implements Exporter {
   extension = "nt";
   mimeType = "application/n-triples;charset=utf-8";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
-    return createStringResult(snapshot, this, serializeNTriples(buildCanonicalTriples(snapshot, standardsModel)));
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
+    return createStringResult(
+      snapshot,
+      this,
+      serializeNTriples(buildCanonicalTriples(snapshot, standardsModel)),
+      standardsValidation.warnings,
+      standardsValidation.findings,
+    );
   }
 }
 
@@ -724,9 +804,16 @@ class RdfXmlExporter implements Exporter {
   extension = "rdf";
   mimeType = "application/rdf+xml";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
-    return createStringResult(snapshot, this, serializeRdfXml(buildCanonicalTriples(snapshot, standardsModel)));
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
+    return createStringResult(
+      snapshot,
+      this,
+      serializeRdfXml(buildCanonicalTriples(snapshot, standardsModel)),
+      standardsValidation.warnings,
+      standardsValidation.findings,
+    );
   }
 }
 
@@ -736,8 +823,9 @@ class OwlExporter implements Exporter {
   extension = "owl.rdf";
   mimeType = "application/rdf+xml";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
     const body = standardsModel.concepts
       .map((concept) => [
         `  <owl:Class rdf:about="${escapeXml(getConceptIri(snapshot, concept))}">`,
@@ -751,6 +839,8 @@ class OwlExporter implements Exporter {
       snapshot,
       this,
       `<?xml version="1.0" encoding="UTF-8"?>\n<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:owl="http://www.w3.org/2002/07/owl#">\n  <owl:Ontology rdf:about="${escapeXml(ontologyUri(snapshot))}">\n    <rdfs:label>${escapeXml(snapshot.ontology.title)}</rdfs:label>\n  </owl:Ontology>\n${body}\n</rdf:RDF>`,
+      standardsValidation.warnings,
+      standardsValidation.findings,
     );
   }
 }
@@ -761,9 +851,16 @@ class SkosExporter implements Exporter {
   extension = "skos.ttl";
   mimeType = "text/turtle;charset=utf-8";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
-    return createStringResult(snapshot, this, serializeTurtle(buildCanonicalTriples(snapshot, standardsModel)));
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
+    return createStringResult(
+      snapshot,
+      this,
+      serializeTurtle(buildCanonicalTriples(snapshot, standardsModel)),
+      standardsValidation.warnings,
+      standardsValidation.findings,
+    );
   }
 }
 
@@ -773,8 +870,9 @@ class XmiExporter implements Exporter {
   extension = "xmi";
   mimeType = "application/xml";
 
-  async export(snapshot: OntologyExportSnapshot): Promise<ExportResult> {
+  async export(snapshot: OntologyExportSnapshot, client: AppSupabaseClient): Promise<ExportResult> {
     const standardsModel = mapSnapshotToStandardsModel(snapshot);
+    const standardsValidation = await buildStandardsExportWarnings(client, snapshot, standardsModel);
     const classes = standardsModel.concepts
       .map(
         (concept) =>
@@ -792,6 +890,8 @@ class XmiExporter implements Exporter {
       snapshot,
       this,
       `<?xml version="1.0" encoding="UTF-8"?>\n<xmi:XMI xmlns:xmi="http://www.omg.org/spec/XMI/20131001" xmlns:uml="http://www.omg.org/spec/UML/20161101">\n  <uml:Model xmi:id="${escapeXml(snapshot.ontology.id)}" name="${escapeXml(snapshot.ontology.title)}">\n${classes}\n${associations}\n  </uml:Model>\n</xmi:XMI>`,
+      standardsValidation.warnings,
+      standardsValidation.findings,
     );
   }
 }

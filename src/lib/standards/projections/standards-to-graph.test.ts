@@ -185,6 +185,69 @@ describe("projectStandardsUmlToGraphModel", () => {
     );
   });
 
+  it("keeps structured association attributes in UML edge properties", () => {
+    const graphModel = projectStandardsUmlToGraphModel(
+      createStandardsModel({
+        profiles: ["mim"],
+        classes: [
+          {
+            id: "class-a",
+            label: "A",
+          },
+          {
+            id: "class-b",
+            label: "B",
+          },
+        ],
+        associations: [
+          {
+            id: "assoc-structured",
+            label: "links",
+            source: {
+              classId: "class-a",
+              role: "sourceRole",
+              cardinality: "0..*",
+            },
+            target: {
+              classId: "class-b",
+              role: "targetRole",
+              cardinality: "1",
+            },
+            attributes: [
+              {
+                id: "assoc-attr-order",
+                name: "order",
+                datatypeId: "xsd:integer",
+              },
+            ],
+          } as any,
+        ],
+      }),
+    );
+
+    expect(graphModel.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "assoc-structured",
+          kind: "association",
+          properties: expect.objectContaining({
+            sourceRole: "sourceRole",
+            targetRole: "targetRole",
+            sourceCardinality: "0..*",
+            targetCardinality: "1",
+            associationAttributes: [
+              expect.objectContaining({
+                id: "assoc-attr-order",
+                name: "order",
+                datatypeId: "xsd:integer",
+              }),
+            ],
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("resolves to UML view automatically when canonical model carries class structures", () => {
     const graphModel = projectStandardsToGraphModel(
       createStandardsModel({

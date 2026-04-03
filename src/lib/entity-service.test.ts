@@ -1,8 +1,108 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deleteDefinition, deleteOntology, updateDefinition, updateOntology } from "@/lib/entity-service";
+const fetchStandardsRuntimeSettings = vi.fn();
+
+vi.mock("@/lib/standards/settings-service", () => ({
+  fetchStandardsRuntimeSettings: (...args: unknown[]) => fetchStandardsRuntimeSettings(...args),
+}));
+
+import { createDefinition, deleteDefinition, deleteOntology, updateDefinition, updateOntology } from "@/lib/entity-service";
+import { StandardsBlockingFindingsError } from "@/lib/standards/compliance";
 
 describe("entity-service", () => {
+  beforeEach(() => {
+    fetchStandardsRuntimeSettings.mockReset();
+  });
+
+  it("uses authoritative runtime settings for definition creation instead of stale caller settings", async () => {
+    fetchStandardsRuntimeSettings.mockResolvedValueOnce({
+      enabledStandards: ["nl-sbb"],
+      ruleOverrides: {
+        nl_sbb_invalid_concept_iri: "blocking",
+      },
+    });
+    const client = {
+      from: vi.fn(),
+    } as any;
+
+    await expect(createDefinition(client, {
+      ontologyId: "ontology-1",
+      ontologyTitle: "Security Ontology",
+      createdBy: "user-1",
+      definition: {
+        title: "Access Policy",
+        description: "Policy definition",
+        metadata: {
+          iri: "not-a-valid-iri",
+        },
+      },
+      standards: {
+        ontologyId: "ontology-1",
+        ontologyTitle: "Security Ontology",
+        settings: {
+          enabledStandards: [],
+          ruleOverrides: {},
+        },
+      },
+    })).rejects.toBeInstanceOf(StandardsBlockingFindingsError);
+
+    expect(fetchStandardsRuntimeSettings).toHaveBeenCalledWith(client);
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it("honors disabled authoritative standards even when stale caller settings are stricter", async () => {
+    fetchStandardsRuntimeSettings.mockResolvedValueOnce({
+      enabledStandards: [],
+      ruleOverrides: {},
+    });
+    const definitionSingle = vi.fn().mockResolvedValue({
+      data: { id: "definition-1", title: "Access Policy" },
+      error: null,
+    });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "definitions") {
+          return { insert: definitionInsert };
+        }
+
+        if (table === "activity_events") {
+          return { insert: activityInsert };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    } as any;
+
+    await createDefinition(client, {
+      ontologyId: "ontology-1",
+      ontologyTitle: "Security Ontology",
+      createdBy: "user-1",
+      definition: {
+        title: "Access Policy",
+        description: "Policy definition",
+        metadata: {
+          iri: "not-a-valid-iri",
+        },
+      },
+      standards: {
+        ontologyId: "ontology-1",
+        ontologyTitle: "Security Ontology",
+        settings: {
+          enabledStandards: ["nl-sbb"],
+          ruleOverrides: {
+            nl_sbb_invalid_concept_iri: "blocking",
+          },
+        },
+      },
+    });
+
+    expect(fetchStandardsRuntimeSettings).toHaveBeenCalledWith(client);
+    expect(definitionInsert).toHaveBeenCalledTimes(1);
+  });
+
   it("deletes definitions through the backend cascade rpc", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: { deleted: true }, error: null });
     const client = { rpc } as any;
@@ -86,6 +186,135 @@ describe("entity-service", () => {
         source: "graph",
       }),
     }));
+  });
+
+  it("creates definitions through the shared service and logs activity", async () => {
+    const definitionSingle = vi.fn().mockResolvedValue({
+      data: { id: "definition-1", title: "Access Policy" },
+      error: null,
+    });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "definitions") {
+          return { insert: definitionInsert };
+        }
+
+        if (table === "activity_events") {
+          return { insert: activityInsert };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    } as any;
+
+    await createDefinition(client, {
+      ontologyId: "ontology-1",
+      createdBy: "user-1",
+      definition: {
+        title: "Access Policy",
+        description: "Policy definition",
+        content: "Context",
+        example: "Example",
+        priority: "normal",
+        status: "draft",
+      },
+    });
+
+    expect(definitionInsert).toHaveBeenCalledWith(expect.objectContaining({
+      ontology_id: "ontology-1",
+      created_by: "user-1",
+      title: "Access Policy",
+    }));
+    expect(activityInsert).toHaveBeenCalledWith(expect.objectContaining({
+      action: "created",
+      entity_type: "definition",
+      entity_title: "Access Policy",
+    }));
+  });
+
+  it("blocks definition creation on blocking standards findings before writing", async () => {
+    fetchStandardsRuntimeSettings.mockResolvedValueOnce({
+      enabledStandards: ["nl-sbb"],
+      ruleOverrides: {
+        nl_sbb_invalid_concept_iri: "blocking",
+      },
+    });
+    const client = {
+      from: vi.fn(),
+    } as any;
+
+    await expect(createDefinition(client, {
+      ontologyId: "ontology-1",
+      ontologyTitle: "Security Ontology",
+      createdBy: "user-1",
+      definition: {
+        title: "Access Policy",
+        description: "Policy definition",
+        metadata: {
+          iri: "not-a-valid-iri",
+        },
+      },
+      standards: {
+        ontologyId: "ontology-1",
+        ontologyTitle: "Security Ontology",
+        settings: {
+          enabledStandards: ["nl-sbb"],
+          ruleOverrides: {
+            nl_sbb_invalid_concept_iri: "blocking",
+          },
+        },
+      },
+    })).rejects.toBeInstanceOf(StandardsBlockingFindingsError);
+
+    expect(client.from).not.toHaveBeenCalled();
+  });
+
+  it("blocks definition updates on blocking standards findings before writing version history", async () => {
+    fetchStandardsRuntimeSettings.mockResolvedValueOnce({
+      enabledStandards: ["nl-sbb"],
+      ruleOverrides: {
+        nl_sbb_invalid_concept_iri: "blocking",
+      },
+    });
+    const client = {
+      from: vi.fn(),
+    } as any;
+
+    await expect(updateDefinition(client, {
+      definitionId: "definition-1",
+      userId: "user-1",
+      previous: {
+        title: "Old Definition",
+        description: "Previous description",
+        content: "Previous context",
+        example: "Previous example",
+        metadata: {
+          iri: "not-a-valid-iri",
+        },
+        version: 2,
+      },
+      changes: {
+        title: "Renamed Definition",
+        description: "Previous description",
+        content: "Previous context",
+        example: "Previous example",
+      },
+      standards: {
+        ontologyId: "ontology-1",
+        ontologyTitle: "Security Ontology",
+        settings: {
+          enabledStandards: ["nl-sbb"],
+          ruleOverrides: {
+            nl_sbb_invalid_concept_iri: "blocking",
+          },
+        },
+      },
+    })).rejects.toBeInstanceOf(StandardsBlockingFindingsError);
+
+    expect(client.from).not.toHaveBeenCalled();
   });
 
   it("updates ontologies through the shared ontology service and logs history", async () => {
