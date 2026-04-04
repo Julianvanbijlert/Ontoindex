@@ -275,6 +275,37 @@ describe("validateStandardsModel", () => {
     );
   });
 
+  it("preserves backward-compatible SKOS issues through validateStandardsModel", () => {
+    const result = validateStandardsModel(createStandardsModel({
+      profiles: ["skos"],
+      conceptSchemes: [
+        {
+          id: "scheme-security",
+          label: "Security Vocabulary",
+        },
+      ],
+      concepts: [
+        {
+          id: "concept-policy",
+          schemeId: "scheme-security",
+          prefLabel: "Access policy",
+          altLabels: ["Access policy"],
+        },
+      ],
+    }));
+
+    expect(result.valid).toBe(true);
+    expect(result.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profile: "skos",
+          code: "skos_alt_label_duplicates_pref_label",
+          path: "concepts[concept-policy].altLabels",
+        }),
+      ]),
+    );
+  });
+
   it("passes valid RDF triple structures", () => {
     const result = validateStandardsModel(createStandardsModel({
       profiles: ["rdf"],

@@ -42,7 +42,7 @@ describe("mapOntologyToStandardsModel", () => {
       ],
     });
 
-    expect(model.profiles).toEqual(expect.arrayContaining(["nl-sbb", "rdf"]));
+    expect(model.profiles).toEqual(expect.arrayContaining(["skos", "nl-sbb", "rdf"]));
     expect(model.conceptSchemes).toEqual([
       expect.objectContaining({
         id: "onto-1",
@@ -74,6 +74,45 @@ describe("mapOntologyToStandardsModel", () => {
         subject: expect.objectContaining({ value: "https://example.com/security#AccessPolicy" }),
         predicate: expect.objectContaining({ termType: "iri" }),
         object: expect.objectContaining({ value: "https://example.com/security#ControlObjective" }),
+      }),
+    ]);
+  });
+
+  it("maps standards-shaped definition source and publication metadata into concepts", () => {
+    const model = mapOntologyToStandardsModel({
+      ontologyId: "onto-2",
+      ontologyTitle: "Regulatory Ontology",
+      definitions: [
+        {
+          id: "def-legal-basis",
+          title: "Processing basis",
+          description: "The legal basis for processing personal data.",
+          metadata: {
+            iri: "https://example.com/regulatory#ProcessingBasis",
+            altLabels: ["Basis for processing"],
+            sourceReference: "AVG article 6",
+            sourceUrl: "https://wetten.overheid.nl/jci1.3:c:BWBR0040940&hoofdstuk=2",
+            legalBasisRequired: true,
+            legalBasis: "AVG article 6",
+            topConcept: true,
+            language: "nl",
+          },
+          relationships: [],
+        },
+      ],
+    });
+
+    expect(model.concepts).toEqual([
+      expect.objectContaining({
+        id: "def-legal-basis",
+        prefLabel: "Processing basis",
+        altLabels: ["Basis for processing"],
+        sourceReference: "AVG article 6",
+        sourceUrl: "https://wetten.overheid.nl/jci1.3:c:BWBR0040940&hoofdstuk=2",
+        legalBasisRequired: true,
+        legalBasis: "AVG article 6",
+        topConceptOfSchemeId: "onto-2",
+        language: "nl",
       }),
     ]);
   });

@@ -265,7 +265,7 @@ function buildUmlAssociations(
       byId.set(relationship.id, {
         id: relationship.id,
         label: readString(associationMetadata?.label)
-          || getRelationshipDisplayLabel(relationship.type, relationship.label),
+          || getRelationshipDisplayLabel(relationship.type, relationship.label, relationship.metadata),
         iri: readString(associationMetadata?.iri) || undefined,
         source: {
           classId: relationship.source_id,
@@ -358,7 +358,9 @@ function buildConcept(schemeId: string, definition: OntologyStandardsDefinition)
     id: definition.id,
     schemeId,
     prefLabel: definition.title,
-    altLabels: [],
+    altLabels: readStringArray(
+      (isRecord(definition.metadata) ? definition.metadata.altLabels : null) ?? [],
+    ),
     iri: readStringMetadata(definition, "iri") ?? undefined,
     definition: definition.description || undefined,
     scopeNote: definition.content || undefined,
@@ -400,7 +402,7 @@ function buildConceptRelations(definitions: OntologyStandardsDefinition[]): Stan
         sourceConceptId: relationship.source_id,
         targetConceptId: relationship.target_id,
         kind,
-        label: readString(relationMetadata?.label) || getRelationshipDisplayLabel(relationship.type, relationship.label),
+        label: readString(relationMetadata?.label) || getRelationshipDisplayLabel(relationship.type, relationship.label, relationship.metadata),
         predicateIri: readString(relationMetadata?.predicateIri) || toPredicateIri(predicateKey),
         predicateKey,
         ...(relationAttributes.length > 0 ? { attributes: relationAttributes } : {}),
@@ -460,6 +462,7 @@ export function mapOntologyToStandardsModel(input: {
     .map((item) => item.trace?.sourceFormat)
     .find((value): value is string => typeof value === "string" && !!value.trim());
   const profiles = [...new Set([
+    "skos",
     "nl-sbb",
     "rdf",
     ...(classes.length > 0 ? ["mim"] : []),

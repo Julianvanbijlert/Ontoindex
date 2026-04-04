@@ -84,6 +84,57 @@ function hierarchyCycles(model: StandardsModel) {
   return findings;
 }
 
+function hierarchyReciprocityFindings(model: StandardsModel) {
+  const findings: StandardsFindingInput[] = [];
+  const hierarchyRelations = model.conceptRelations.filter((item) => item.kind === "broader" || item.kind === "narrower");
+  const relationsByDirection = new Map<string, StandardsConceptRelation[]>();
+
+  model.conceptRelations.forEach((relation) => {
+    const key = `${relation.sourceConceptId}->${relation.targetConceptId}`;
+    relationsByDirection.set(key, [...(relationsByDirection.get(key) || []), relation]);
+  });
+
+  const emittedPairs = new Set<string>();
+
+  hierarchyRelations.forEach((relation) => {
+    const reverseKey = `${relation.targetConceptId}->${relation.sourceConceptId}`;
+    const reverseRelations = relationsByDirection.get(reverseKey) || [];
+
+    if (reverseRelations.length === 0) {
+      return;
+    }
+
+    const expectedKind = relation.kind === "broader" ? "narrower" : "broader";
+
+    if (reverseRelations.some((candidate) => candidate.kind === expectedKind)) {
+      return;
+    }
+
+    const pairKey = [relation.sourceConceptId, relation.targetConceptId].sort().join("::");
+
+    if (emittedPairs.has(pairKey)) {
+      return;
+    }
+
+    emittedPairs.add(pairKey);
+    findings.push(createFinding({
+      message: `Hierarchy links between "${relation.sourceConceptId}" and "${relation.targetConceptId}" use explicit reverse relations but do not mirror broader/narrower semantics.`,
+      path: `conceptRelations[${relation.id}]`,
+      entityKind: "conceptRelation",
+      entityId: relation.id,
+      relatedEntityId: reverseRelations[0]?.id,
+      severity: "warning",
+      explanation: "When both directions are modeled explicitly, the reverse link should use the inverse broader/narrower semantic so the hierarchy remains readable and publishable.",
+      metadata: {
+        expectedReverseKind: expectedKind,
+        reverseKinds: reverseRelations.map((item) => item.kind),
+      },
+    }));
+  });
+
+  return findings;
+}
+
 const requiredRules = [
   createRule({ ruleId: "nl_sbb_scheme_exists", title: "NL-SBB concept scheme required", description: "Concepts should belong to at least one concept scheme.", rationale: "A concept scheme anchors concept ownership and publication context.", explanation: "Create or import a concept scheme before publishing concepts with this starter NL-SBB catalog.", defaultSeverity: "error", category: "required", scope: "model", requiresGlobalContext: true, validate: ({ model }) => model.concepts.length > 0 && model.conceptSchemes.length === 0 ? [createFinding({ message: "The canonical model contains concepts but no concept schemes.", path: "conceptSchemes", entityKind: "conceptScheme", entityId: "conceptSchemes" })] : [] }),
   createRule({ ruleId: "nl_sbb_missing_scheme_label", title: "NL-SBB scheme label recommended in starter catalog", description: "Concept schemes should be named in the starter catalog.", rationale: "Named schemes make classification and publication reviews clearer.", explanation: "Add a readable concept scheme label so people can understand what the scheme represents.", defaultSeverity: "warning", category: "required", scope: "conceptScheme", requiresGlobalContext: false, validate: ({ model }) => model.conceptSchemes.flatMap((item) => validateScheme(item).filter((finding) => finding.field === "label")) }),
@@ -105,6 +156,7 @@ const consistencyRules = [
   createRule({ ruleId: "nl_sbb_unmapped_relation_semantics", title: "NL-SBB custom relation semantics should be mapped", description: "Custom concept relations should ideally carry an explicit predicate mapping.", rationale: "Mapped predicates make custom relations easier to interpret outside the application.", explanation: "Add an explicit predicate IRI or align the relation to a known broader, narrower, or related mapping where possible.", defaultSeverity: "warning", category: "consistency", scope: "conceptRelation", requiresGlobalContext: false, validate: ({ model }) => { const conceptsById = new Map(model.concepts.map((item) => [item.id, item])); return model.conceptRelations.flatMap((item) => validateRelation(item, conceptsById).filter((finding) => finding.path === `conceptRelations[${item.id}]` && finding.severity === "warning" && !!finding.metadata?.predicateKey)); } }),
   createRule({ ruleId: "nl_sbb_hierarchy_no_self_reference", title: "NL-SBB hierarchy should not self-reference", description: "Broader and narrower relations should not point back to the same concept.", rationale: "Self-referential hierarchy links are structurally broken.", explanation: "Remove the self-referential hierarchy link or point it to the intended related concept.", defaultSeverity: "error", category: "consistency", scope: "conceptRelation", requiresGlobalContext: false, validate: ({ model }) => { const conceptsById = new Map(model.concepts.map((item) => [item.id, item])); return model.conceptRelations.flatMap((item) => validateRelation(item, conceptsById).filter((finding) => !finding.field && !finding.severity && finding.relatedEntityId === item.targetConceptId && item.sourceConceptId === item.targetConceptId)); } }),
   createRule({ ruleId: "nl_sbb_hierarchy_cycle", title: "NL-SBB hierarchy should not form cycles", description: "Broader and narrower relations should remain acyclic in this starter pack.", rationale: "Hierarchy cycles make broader and narrower semantics ambiguous.", explanation: "Break the hierarchy cycle so the concept structure remains understandable and publishable.", defaultSeverity: "warning", category: "consistency", scope: "model", requiresGlobalContext: true, validate: ({ model }) => hierarchyCycles(model) }),
+  createRule({ ruleId: "nl_sbb_broader_narrower_reciprocity", title: "NL-SBB explicit reverse hierarchy links should be reciprocal", description: "When broader or narrower links are modeled in both directions, the reverse link should use the inverse hierarchy semantic.", rationale: "Explicit reverse hierarchy links that do not mirror broader/narrower semantics make the hierarchy harder to interpret and can confuse publication mappings.", explanation: "If you model both directions explicitly, use broader in one direction and narrower in the reverse direction.", defaultSeverity: "warning", category: "consistency", scope: "model", requiresGlobalContext: true, validate: ({ model }) => hierarchyReciprocityFindings(model) }),
   createRule({ ruleId: "nl_sbb_cross_scheme_relation", title: "NL-SBB cross-scheme hierarchy warning", description: "Hierarchical links should usually stay inside one concept scheme in this starter pack.", rationale: "Cross-scheme broader and narrower links often signal scheme-boundary problems.", explanation: "Review the scheme boundaries or replace the hierarchy with a looser relation if the concepts belong to different schemes.", defaultSeverity: "warning", category: "consistency", scope: "conceptRelation", requiresGlobalContext: true, validate: ({ model }) => { const conceptsById = new Map(model.concepts.map((item) => [item.id, item])); return model.conceptRelations.flatMap((item) => validateRelation(item, conceptsById).filter((finding) => !finding.field && finding.severity === "warning" && !finding.metadata)); } }),
   createRule({ ruleId: "nl_sbb_top_concept_consistency", title: "NL-SBB top concept marker should match scheme membership", description: "When top-concept metadata is present, it should align with the concept's own scheme.", rationale: "Mismatched top-concept markers can mislead publication tooling and editors.", explanation: "Align the top-concept marker with the concept's actual scheme or remove the marker until the scheme is confirmed.", defaultSeverity: "warning", category: "consistency", scope: "concept", requiresGlobalContext: false, validate: ({ model }) => { const schemeIds = new Set(model.conceptSchemes.map((item) => item.id)); return model.concepts.flatMap((item) => validateConcept(item, schemeIds).filter((finding) => finding.field === "topConceptOfSchemeId")); } }),
 ] satisfies StandardsRuleDefinition[];

@@ -59,6 +59,7 @@ interface DefinitionUpdateInput {
     description?: string | null;
     content?: string | null;
     example?: string | null;
+    metadata?: Database["public"]["Tables"]["definitions"]["Row"]["metadata"];
   };
   source?: "detail" | "graph";
   standards?: DefinitionStandardsValidationInput;
@@ -98,6 +99,10 @@ function buildDefinitionUpdateSummary(input: DefinitionUpdateInput) {
     changedFields.push("example");
   }
 
+  if (JSON.stringify(input.previous.metadata || null) !== JSON.stringify(input.changes.metadata ?? input.previous.metadata ?? null)) {
+    changedFields.push("standards metadata");
+  }
+
   if (changedFields.length === 0) {
     return `Saved "${input.changes.title}" without content changes.`;
   }
@@ -131,6 +136,7 @@ async function ensureDefinitionSaveAllowed(client: AppSupabaseClient, input: {
   description?: string | null;
   content?: string | null;
   example?: string | null;
+  metadata?: Database["public"]["Tables"]["definitions"]["Row"]["metadata"];
   standards?: DefinitionStandardsValidationInput;
 }) {
   if (!input.standards) {
@@ -149,7 +155,7 @@ async function ensureDefinitionSaveAllowed(client: AppSupabaseClient, input: {
       content: input.content,
       example: input.example,
       status: input.standards.status,
-      metadata: input.standards.metadata,
+      metadata: input.metadata ?? input.standards.metadata,
       relationships: input.standards.relationships,
     },
     settings,
@@ -170,6 +176,7 @@ export async function createDefinition(client: AppSupabaseClient, input: Definit
     description: input.definition.description,
     content: input.definition.content,
     example: input.definition.example,
+    metadata: input.definition.metadata,
     standards: input.standards
       ? {
           ...input.standards,
@@ -223,6 +230,7 @@ export async function updateDefinition(client: AppSupabaseClient, input: Definit
     description: input.changes.description,
     content: input.changes.content,
     example: input.changes.example,
+    metadata: input.changes.metadata ?? input.previous.metadata,
     standards: input.standards
       ? {
           ...input.standards,
@@ -249,6 +257,7 @@ export async function updateDefinition(client: AppSupabaseClient, input: Definit
       description: input.changes.description || "",
       content: input.changes.content || "",
       example: input.changes.example || "",
+      metadata: input.changes.metadata ?? input.previous.metadata ?? null,
       version: (input.previous.version || 1) + 1,
     })
     .eq("id", input.definitionId)

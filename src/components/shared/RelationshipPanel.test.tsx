@@ -151,11 +151,13 @@ describe("RelationshipPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /add relationship/i }));
 
-    expect(screen.getByText("Suggested compliant relations")).toBeInTheDocument();
+    expect(screen.getByText(/standards-first relationship choices/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /use broader/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /use narrower/i })).toBeInTheDocument();
-    expect(screen.getByText(/recommended for hierarchical concept links/i)).toBeInTheDocument();
-    expect(screen.getByText(/keeps the skos semantics/i)).toBeInTheDocument();
-    expect(screen.getByText(/custom type/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /use related/i })).toBeInTheDocument();
+    expect(screen.getByText(/source is broader than the target/i)).toBeInTheDocument();
+    expect(screen.getByText(/retain skos narrower semantics/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/custom or legacy app relation/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/use this fallback when the standards-first choices do not fit/i)).toBeInTheDocument();
   });
 });

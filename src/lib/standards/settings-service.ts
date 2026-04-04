@@ -56,6 +56,13 @@ function createDefaultRuleOverrides() {
     "nl_sbb_unknown_relation_source",
     "nl_sbb_unknown_relation_target",
     "nl_sbb_cross_scheme_relation",
+    "skos_unknown_scheme",
+    "skos_unknown_relation_source",
+    "skos_unknown_relation_target",
+    "skos_invalid_scheme_iri",
+    "skos_invalid_concept_iri",
+    "skos_invalid_predicate_iri",
+    "skos_hierarchy_no_self_reference",
     "rdf_invalid_subject_iri",
     "rdf_invalid_predicate_iri",
     "rdf_invalid_object_iri",
@@ -73,7 +80,9 @@ function createDefaultRuleOverrides() {
 
 export function createDefaultStandardsSettings(): StandardsRuntimeSettings {
   return {
-    enabledStandards: builtInStandardsPacks.map((pack) => pack.standardId),
+    enabledStandards: builtInStandardsPacks
+      .map((pack) => pack.standardId)
+      .filter((standardId) => standardId !== "skos"),
     ruleOverrides: createDefaultRuleOverrides(),
   };
 }

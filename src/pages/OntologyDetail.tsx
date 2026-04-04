@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { LikeButton } from "@/components/shared/LikeButton";
 import { ImportDialog } from "@/components/shared/ImportDialog";
 import { ExportDialog } from "@/components/shared/ExportDialog";
+import { DefinitionStandardsFields } from "@/components/definition/DefinitionStandardsFields";
 import { Plus, Network, Edit2, Save, X, Loader2, Upload, Download, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +38,6 @@ import { recordEntityView } from "@/lib/history-service";
 import {
   createRelationshipRecord,
   CUSTOM_RELATION_TYPE,
-  predefinedRelationshipTypes,
 } from "@/lib/relationship-service";
 import {
   canCreateDefinition,
@@ -59,6 +59,14 @@ import {
   evaluateOntologyStandardsCompliance,
   evaluateRelationshipStandardsCompliance,
 } from "@/lib/standards/compliance";
+import {
+  buildDefinitionStandardsMetadata,
+  createEmptyDefinitionStandardsMetadataDraft,
+  getDefinitionAuthoringConfig,
+  getFallbackRelationshipTypes,
+  getStandardsFirstRelationshipChoices,
+  mergeStandardsFirstRelationshipChoices,
+} from "@/lib/standards/authoring";
 
 type PriorityLevel = Enums<"priority_level">;
 type WorkflowStatus = Enums<"workflow_status">;
@@ -112,7 +120,7 @@ export default function OntologyDetail() {
   const [creatingGraphRelation, setCreatingGraphRelation] = useState(false);
   const [renamingGraphDefinition, setRenamingGraphDefinition] = useState(false);
   const [pendingConnection, setPendingConnection] = useState<PendingGraphConnection | null>(null);
-  const [graphRelationType, setGraphRelationType] = useState<RelationshipSelection>(predefinedRelationshipTypes[0]);
+  const [graphRelationType, setGraphRelationType] = useState<RelationshipSelection>("related_to");
   const [graphCustomRelationType, setGraphCustomRelationType] = useState("");
   const [graphSuggestionMetadata, setGraphSuggestionMetadata] = useState<Json | null>(null);
   const [graphRenameDefinitionId, setGraphRenameDefinitionId] = useState<string | null>(null);
@@ -124,12 +132,14 @@ export default function OntologyDetail() {
     content: string;
     example: string;
     priority: PriorityLevel;
+    standards: ReturnType<typeof createEmptyDefinitionStandardsMetadataDraft>;
   }>({
     title: "",
     description: "",
     content: "",
     example: "",
     priority: "normal",
+    standards: createEmptyDefinitionStandardsMetadataDraft(),
   });
   const canMutateOntology = canEditOntology(role);
   const canRemoveOntology = canDeleteOntology(role);
@@ -139,6 +149,10 @@ export default function OntologyDetail() {
   const canAddDefinition = canCreateDefinition(role);
   const viewedOntologyIdRef = useRef<string | null>(null);
   const { settings: standardsSettings } = useStandardsRuntimeSettings();
+  const definitionAuthoringConfig = useMemo(
+    () => getDefinitionAuthoringConfig(standardsSettings),
+    [standardsSettings],
+  );
 
   const fetchAll = async () => {
     if (!id) return;
@@ -256,6 +270,17 @@ export default function OntologyDetail() {
     },
     [definitions, graphCustomRelationType, graphRelationType, graphSuggestionMetadata, ontology?.id, ontology?.title, pendingConnection, standardsSettings],
   );
+  const graphPrimaryRelationshipChoices = useMemo(
+    () => mergeStandardsFirstRelationshipChoices(
+      getStandardsFirstRelationshipChoices(standardsSettings),
+      graphRelationshipCompliance.relationSuggestions,
+    ),
+    [graphRelationshipCompliance.relationSuggestions, standardsSettings],
+  );
+  const graphFallbackRelationshipTypes = useMemo(
+    () => getFallbackRelationshipTypes(standardsSettings),
+    [standardsSettings],
+  );
 
   const handleSaveOntology = async () => {
     if (!canMutateOntology) { toast.error("Your current role is read-only."); return; }
@@ -292,6 +317,7 @@ export default function OntologyDetail() {
     if (!newDef.title.trim()) { toast.error("Title required"); return; }
     setCreating(true);
     try {
+      const definitionMetadata = buildDefinitionStandardsMetadata(null, newDef.standards);
       const data = await createDefinition(supabase, {
         ontologyId: id!,
         ontologyTitle: ontology?.title,
@@ -303,17 +329,26 @@ export default function OntologyDetail() {
           example: newDef.example.trim(),
           priority: newDef.priority,
           status: "draft" satisfies WorkflowStatus,
+          metadata: definitionMetadata,
         },
         standards: {
           ontologyId: id,
           ontologyTitle: ontology?.title,
           status: "draft",
+          metadata: definitionMetadata,
           relationships: [],
         },
       });
       toast.success("Definition created");
       setCreateDefOpen(false);
-      setNewDef({ title: "", description: "", content: "", example: "", priority: "normal" });
+      setNewDef({
+        title: "",
+        description: "",
+        content: "",
+        example: "",
+        priority: "normal",
+        standards: createEmptyDefinitionStandardsMetadataDraft(),
+      });
       emitAppDataChanged({ entityType: "definition", action: "created", entityId: data.id });
       fetchAll();
     } catch (error) {
@@ -348,7 +383,7 @@ export default function OntologyDetail() {
     }
 
     setPendingConnection(connection);
-    setGraphRelationType(predefinedRelationshipTypes[0]);
+    setGraphRelationType("related_to");
     setGraphCustomRelationType("");
     setGraphSuggestionMetadata(null);
     setGraphRelationOpen(true);
@@ -552,12 +587,44 @@ export default function OntologyDetail() {
                 <Button size="sm"><Plus className="h-3 w-3 mr-1.5" />Add Definition</Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-lg">
-                <DialogHeader><DialogTitle>Create Definition</DialogTitle></DialogHeader>
+                <DialogHeader>
+                  <DialogTitle>Create Definition</DialogTitle>
+                  <DialogDescription>
+                    Add a definition to this ontology. Active standards expose the fields and hints that matter most for compliant authoring.
+                  </DialogDescription>
+                </DialogHeader>
                 <div className="space-y-4 mt-2">
-                  <div className="space-y-2"><Label>Title *</Label><Input placeholder="Definition title" value={newDef.title} onChange={e => setNewDef(p => ({ ...p, title: e.target.value }))} /></div>
-                  <div className="space-y-2"><Label>Description</Label><Textarea placeholder="Brief description" value={newDef.description} onChange={e => setNewDef(p => ({ ...p, description: e.target.value }))} /></div>
-                  <div className="space-y-2"><Label>Context</Label><Textarea placeholder="Detailed context (markdown)" rows={4} value={newDef.content} onChange={e => setNewDef(p => ({ ...p, content: e.target.value }))} /></div>
-                  <div className="space-y-2"><Label>Example</Label><Textarea placeholder="Usage example" rows={3} value={newDef.example} onChange={e => setNewDef(p => ({ ...p, example: e.target.value }))} /></div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-definition-title">{definitionAuthoringConfig.titleLabel} *</Label>
+                    <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.titleHint}</p>
+                    <Input id="new-definition-title" aria-label={definitionAuthoringConfig.titleLabel} placeholder="Definition title" value={newDef.title} onChange={e => setNewDef(p => ({ ...p, title: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{definitionAuthoringConfig.descriptionLabel}</Label>
+                    <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.descriptionHint}</p>
+                    <Textarea placeholder="Brief description" value={newDef.description} onChange={e => setNewDef(p => ({ ...p, description: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{definitionAuthoringConfig.contentLabel}</Label>
+                    <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.contentHint}</p>
+                    <Textarea placeholder="Detailed context (markdown)" rows={4} value={newDef.content} onChange={e => setNewDef(p => ({ ...p, content: e.target.value }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{definitionAuthoringConfig.exampleLabel}</Label>
+                    <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.exampleHint}</p>
+                    <Textarea placeholder="Usage example" rows={3} value={newDef.example} onChange={e => setNewDef(p => ({ ...p, example: e.target.value }))} />
+                  </div>
+                  <DefinitionStandardsFields
+                    config={definitionAuthoringConfig}
+                    value={newDef.standards}
+                    onChange={(key, nextValue) => setNewDef((current) => ({
+                      ...current,
+                      standards: {
+                        ...current.standards,
+                        [key]: nextValue,
+                      },
+                    }))}
+                  />
                   <div className="space-y-2">
                     <Label>Priority</Label>
                     <Select value={newDef.priority} onValueChange={v => setNewDef(p => ({ ...p, priority: v as PriorityLevel }))}>
@@ -744,35 +811,14 @@ export default function OntologyDetail() {
                 )}
               </p>
             </div>
-            <div className="space-y-2">
-              <Label>Relationship type</Label>
-               <Select value={graphRelationType} onValueChange={(value) => {
-                 setGraphRelationType(value as RelationshipSelection);
-                 setGraphSuggestionMetadata(null);
-               }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {predefinedRelationshipTypes.map((type) => (
-                    <SelectItem key={type} value={type}>{type.replace(/_/g, " ")}</SelectItem>
-                  ))}
-                  <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {graphRelationType === CUSTOM_RELATION_TYPE && (
+            {graphPrimaryRelationshipChoices.length > 0 && (
               <div className="space-y-2">
-                <Label>Custom relation type</Label>
-                <Input value={graphCustomRelationType} onChange={(event) => {
-                  setGraphCustomRelationType(event.target.value);
-                  setGraphSuggestionMetadata(null);
-                }} />
-              </div>
-            )}
-            {graphRelationshipCompliance.relationSuggestions.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-foreground">Suggested compliant relations</p>
+                <p className="text-sm font-medium text-foreground">Standards-first relationship choices</p>
+                <p className="text-xs text-muted-foreground">
+                  {definitionAuthoringConfig.relationshipGuidance}
+                </p>
                 <div className="grid gap-2">
-                  {graphRelationshipCompliance.relationSuggestions.map((suggestion) => (
+                  {graphPrimaryRelationshipChoices.map((suggestion) => (
                     <button
                       key={suggestion.id}
                       type="button"
@@ -793,6 +839,30 @@ export default function OntologyDetail() {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Custom or legacy app relation</Label>
+               <Select value={graphRelationType} onValueChange={(value) => {
+                 setGraphRelationType(value as RelationshipSelection);
+                 setGraphSuggestionMetadata(null);
+               }}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {graphFallbackRelationshipTypes.map((type) => (
+                    <SelectItem key={type} value={type}>{type.replace(/_/g, " ")}</SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {graphRelationType === CUSTOM_RELATION_TYPE && (
+              <div className="space-y-2">
+                <Label>Custom relation type</Label>
+                <Input value={graphCustomRelationType} onChange={(event) => {
+                  setGraphCustomRelationType(event.target.value);
+                  setGraphSuggestionMetadata(null);
+                }} />
               </div>
             )}
             {graphRelationshipCompliance.findings.length > 0 && (

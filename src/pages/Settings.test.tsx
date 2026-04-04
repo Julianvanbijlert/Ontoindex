@@ -57,12 +57,13 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/components/ui/switch", () => ({
-  Switch: ({ checked, disabled, onCheckedChange }: any) => (
+  Switch: ({ checked, disabled, onCheckedChange, ...props }: any) => (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       disabled={disabled}
+      {...props}
       onClick={() => onCheckedChange(!checked)}
     >
       {checked ? "On" : "Off"}
@@ -181,9 +182,11 @@ describe("Settings", () => {
 
     render(<Settings />);
 
-    expect(await screen.findByText("Appearance")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /appearance/i })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /standards/i })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /ai/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /ai/i }));
     expect(await screen.findByText("Admin AI Settings")).toBeInTheDocument();
-    expect(await screen.findByText("Standards Compliance")).toBeInTheDocument();
     expect((await screen.findAllByText("Gemini")).length).toBeGreaterThan(0);
     expect(fetchAdminChatSettings).toHaveBeenCalled();
     expect(fetchAdminStandardsSettings).toHaveBeenCalled();
@@ -202,6 +205,7 @@ describe("Settings", () => {
 
     render(<Settings />);
 
+    fireEvent.click(await screen.findByRole("tab", { name: /ai/i }));
     expect(await screen.findByText("Admin AI Settings")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("Set Gemini key"), {
@@ -217,16 +221,40 @@ describe("Settings", () => {
     }));
   });
 
+  it("renders the standards tab as one module per standard with severity help and exclusive rule controls", async () => {
+    authState.role = "admin";
+
+    render(<Settings />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /standards/i }));
+    expect(await screen.findByText("Standards Compliance")).toBeInTheDocument();
+
+    expect(screen.getByText("MIM")).toBeInTheDocument();
+    expect(screen.getByText("NL-SBB")).toBeInTheDocument();
+    expect(screen.getByText("RDF")).toBeInTheDocument();
+    expect(screen.getByText("SKOS")).toBeInTheDocument();
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /severity meanings/i }));
+    expect((await screen.findAllByText(/optional guidance \/ best-practice hint/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/prevents save\/create\/export/i).length).toBeGreaterThan(0);
+
+    expect(screen.getByRole("radiogroup", { name: /mim class label recommended in starter catalog severity/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /mim class label recommended in starter catalog info/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /mim class label recommended in starter catalog warning/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /mim class label recommended in starter catalog error/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /mim class label recommended in starter catalog blocking/i })).toBeInTheDocument();
+  });
+
   it("lets admins enable standards and change per-rule severity overrides", async () => {
     authState.role = "admin";
 
     render(<Settings />);
 
+    fireEvent.click(await screen.findByRole("tab", { name: /standards/i }));
     expect(await screen.findByText("Standards Compliance")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("switch", { name: /enable rdf/i }));
-    fireEvent.click(screen.getByRole("button", { name: /mim missing class label severity/i }));
-    fireEvent.click(screen.getByRole("button", { name: /^blocking$/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /mim class label recommended in starter catalog blocking/i }));
     fireEvent.click(screen.getByRole("button", { name: /save standards settings/i }));
 
     await waitFor(() => expect(updateAdminStandardsSettings).toHaveBeenCalled());

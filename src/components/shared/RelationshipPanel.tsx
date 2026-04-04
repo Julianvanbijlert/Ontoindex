@@ -24,6 +24,11 @@ import { canManageRelationships } from "@/lib/authorization";
 import { useStandardsRuntimeSettings } from "@/hooks/use-standards-runtime-settings";
 import { evaluateRelationshipStandardsCompliance } from "@/lib/standards/compliance";
 import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
+import {
+  getFallbackRelationshipTypes,
+  getStandardsFirstRelationshipChoices,
+  mergeStandardsFirstRelationshipChoices,
+} from "@/lib/standards/authoring";
 
 interface Relationship {
   id: string;
@@ -31,6 +36,7 @@ interface Relationship {
   target_id: string;
   label?: string | null;
   type: string;
+  metadata?: Json | null;
   source?: { id?: string; title: string } | null;
   target?: { id?: string; title: string } | null;
 }
@@ -125,6 +131,17 @@ export function RelationshipPanel({
       });
     },
     [customRelationType, entityId, entityMetadata, entityTitle, relType, selectedSuggestionMetadata, selectedTarget, settings],
+  );
+  const primaryRelationshipChoices = useMemo(
+    () => mergeStandardsFirstRelationshipChoices(
+      getStandardsFirstRelationshipChoices(settings),
+      relationshipCompliance.relationSuggestions,
+    ),
+    [relationshipCompliance.relationSuggestions, settings],
+  );
+  const fallbackRelationshipTypes = useMemo(
+    () => getFallbackRelationshipTypes(settings),
+    [settings],
   );
 
   useEffect(() => {
@@ -265,44 +282,16 @@ export function RelationshipPanel({
                     </div>
                   )}
                 </div>
-                <div className="space-y-2">
-                  <Label>Relationship Type</Label>
-                  <Select value={relType} onValueChange={(value) => {
-                    setRelType(value);
-                    setSelectedSuggestionMetadata(null);
-                  }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {predefinedRelationshipTypes.map(t => (
-                        <SelectItem key={t} value={t}>{formatRelationshipType(t)}</SelectItem>
-                      ))}
-                      <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Prefer a suggested standards-aligned relation when possible, or switch to a custom type.
-                  </p>
-                  {relType === CUSTOM_RELATION_TYPE && (
-                    <Input
-                      placeholder="Enter a custom relation type"
-                      value={customRelationType}
-                      onChange={e => {
-                        setCustomRelationType(e.target.value);
-                        setSelectedSuggestionMetadata(null);
-                      }}
-                    />
-                  )}
-                </div>
-                {relationshipCompliance.relationSuggestions.length > 0 && (
+                {primaryRelationshipChoices.length > 0 && (
                   <div className="space-y-2">
                     <div>
-                      <p className="text-sm font-medium text-foreground">Suggested compliant relations</p>
+                      <p className="text-sm font-medium text-foreground">Standards-first relationship choices</p>
                       <p className="text-xs text-muted-foreground">
-                        Choose a recommended relation or keep the custom option if you need something else.
+                        Choose a standards-aligned relation first, or fall back to a custom or legacy app relation if you need something else.
                       </p>
                     </div>
                     <div className="grid gap-2">
-                      {relationshipCompliance.relationSuggestions.map((suggestion) => (
+                      {primaryRelationshipChoices.map((suggestion) => (
                         <button
                           key={suggestion.id}
                           type="button"
@@ -325,6 +314,34 @@ export function RelationshipPanel({
                     </div>
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label>Custom or legacy app relation</Label>
+                  <Select value={relType} onValueChange={(value) => {
+                    setRelType(value);
+                    setSelectedSuggestionMetadata(null);
+                  }}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {fallbackRelationshipTypes.map((type) => (
+                        <SelectItem key={type} value={type}>{formatRelationshipType(type)}</SelectItem>
+                      ))}
+                      <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Use this fallback when the standards-first choices do not fit the meaning you need.
+                  </p>
+                  {relType === CUSTOM_RELATION_TYPE && (
+                    <Input
+                      placeholder="Enter a custom relation type"
+                      value={customRelationType}
+                      onChange={e => {
+                        setCustomRelationType(e.target.value);
+                        setSelectedSuggestionMetadata(null);
+                      }}
+                    />
+                  )}
+                </div>
                 {relationshipCompliance.findings.length > 0 && (
                   <StandardsFindingsPanel
                     title="Current relationship findings"
@@ -366,7 +383,7 @@ export function RelationshipPanel({
                       <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{getRelationshipDisplayLabel(r.type, r.label)}</span>
+                          <span>{getRelationshipDisplayLabel(r.type, r.label, r.metadata)}</span>
                           <Badge variant="outline" className="text-[10px]">
                             {relatedDefinition.directionLabel}
                           </Badge>

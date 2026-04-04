@@ -84,6 +84,11 @@ vi.mock("@/integrations/supabase/client", () => ({
                   description: "Definition description",
                   content: "Definition content",
                   example: "Example content",
+                  metadata: {
+                    iri: "https://example.com/security#AccessPolicy",
+                    sourceReference: "ISO 27001",
+                    sourceUrl: "https://example.com/iso27001",
+                  },
                   tags: ["security"],
                   status: "approved",
                   priority: "normal",
@@ -285,6 +290,44 @@ describe("DefinitionDetail", () => {
     expect(screen.getByText("Standards compliance")).toBeInTheDocument();
     expect(screen.getByText(/preferred label should align/i)).toBeInTheDocument();
     expect(screen.getByText(/prefers a more explicit semantic label/i)).toBeInTheDocument();
+  });
+
+  it("adapts the definition editor to active standards and persists source metadata", async () => {
+    authState.role = "editor";
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Access Policy")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    expect(screen.getByText(/active standards shape this definition form/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/preferred label \/ title/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^definition$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/source reference/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/source url/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/identifier iri/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/source reference/i), {
+      target: { value: "AVG article 6" },
+    });
+    fireEvent.change(screen.getByLabelText(/source url/i), {
+      target: { value: "https://example.com/avg" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(updateDefinitionMock).toHaveBeenCalledTimes(1));
+    expect(updateDefinitionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        changes: expect.objectContaining({
+          metadata: expect.objectContaining({
+            sourceReference: "AVG article 6",
+            sourceUrl: "https://example.com/avg",
+          }),
+        }),
+      }),
+    );
   });
 
   it("prevents saving when effective severity is blocking", async () => {

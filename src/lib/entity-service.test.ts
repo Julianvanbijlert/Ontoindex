@@ -235,6 +235,105 @@ describe("entity-service", () => {
     }));
   });
 
+  it("persists standards-shaped source metadata when creating definitions", async () => {
+    const definitionSingle = vi.fn().mockResolvedValue({
+      data: { id: "definition-1", title: "Access Policy" },
+      error: null,
+    });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionInsert = vi.fn().mockReturnValue({ select: definitionSelect });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "definitions") {
+          return { insert: definitionInsert };
+        }
+
+        if (table === "activity_events") {
+          return { insert: activityInsert };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    } as any;
+
+    await createDefinition(client, {
+      ontologyId: "ontology-1",
+      createdBy: "user-1",
+      definition: {
+        title: "Access Policy",
+        description: "Policy definition",
+        metadata: {
+          sourceReference: "ISO 27001:2022 clause 5",
+          sourceUrl: "https://example.com/iso-27001",
+        },
+      },
+    });
+
+    expect(definitionInsert).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        sourceReference: "ISO 27001:2022 clause 5",
+        sourceUrl: "https://example.com/iso-27001",
+      }),
+    }));
+  });
+
+  it("persists standards-shaped metadata updates for definitions", async () => {
+    const versionInsert = vi.fn().mockResolvedValue({ error: null });
+    const definitionSingle = vi.fn().mockResolvedValue({ data: { id: "definition-1", title: "Updated Definition" }, error: null });
+    const definitionSelect = vi.fn().mockReturnValue({ single: definitionSingle });
+    const definitionUpdateEq = vi.fn().mockReturnValue({ select: definitionSelect });
+    const definitionUpdate = vi.fn().mockReturnValue({ eq: definitionUpdateEq });
+    const activityInsert = vi.fn().mockResolvedValue({ error: null });
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "version_history") {
+          return { insert: versionInsert };
+        }
+
+        if (table === "definitions") {
+          return { update: definitionUpdate };
+        }
+
+        if (table === "activity_events") {
+          return { insert: activityInsert };
+        }
+
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    } as any;
+
+    await updateDefinition(client, {
+      definitionId: "definition-1",
+      userId: "user-1",
+      previous: {
+        title: "Old Definition",
+        description: "Previous definition",
+        content: "Previous context",
+        example: "Previous example",
+        metadata: {},
+        version: 1,
+      },
+      changes: {
+        title: "Updated Definition",
+        description: "Updated definition",
+        content: "Updated context",
+        example: "Updated example",
+        metadata: {
+          sourceReference: "AVG article 6",
+          sourceUrl: "https://example.com/avg",
+        },
+      },
+    });
+
+    expect(definitionUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        sourceReference: "AVG article 6",
+        sourceUrl: "https://example.com/avg",
+      }),
+    }));
+  });
+
   it("blocks definition creation on blocking standards findings before writing", async () => {
     fetchStandardsRuntimeSettings.mockResolvedValueOnce({
       enabledStandards: ["nl-sbb"],

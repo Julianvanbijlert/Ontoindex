@@ -182,6 +182,68 @@ describe("nl-sbb standards catalog", () => {
         ]),
       );
     });
+
+    it("warns when explicit reverse hierarchy links are not reciprocal", () => {
+      const result = runStandardsValidation({
+        model: createStandardsModel({
+          profiles: ["nl-sbb"],
+          conceptSchemes: [
+            {
+              id: "scheme-security",
+              label: "Security",
+              iri: "https://example.com/schemes/security",
+            },
+          ],
+          concepts: [
+            {
+              id: "concept-parent",
+              schemeId: "scheme-security",
+              prefLabel: "Parent concept",
+              iri: "https://example.com/security#parent",
+              definition: "Parent concept definition",
+            },
+            {
+              id: "concept-child",
+              schemeId: "scheme-security",
+              prefLabel: "Child concept",
+              iri: "https://example.com/security#child",
+              definition: "Child concept definition",
+            },
+          ],
+          conceptRelations: [
+            {
+              id: "relation-parent-child",
+              sourceConceptId: "concept-parent",
+              targetConceptId: "concept-child",
+              kind: "broader",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+            },
+            {
+              id: "relation-child-parent",
+              sourceConceptId: "concept-child",
+              targetConceptId: "concept-parent",
+              kind: "related",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#related",
+            },
+          ],
+        }),
+        packs: [nlSbbStandardsPack],
+        settings: {
+          enabledStandards: ["nl-sbb"],
+          ruleOverrides: {},
+        },
+      });
+
+      expect(result.findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: "nl_sbb_broader_narrower_reciprocity",
+            effectiveSeverity: "warning",
+            explanation: expect.stringMatching(/reverse|broader|narrower|recipro/i),
+          }),
+        ]),
+      );
+    });
   });
 
   describe("publication family", () => {

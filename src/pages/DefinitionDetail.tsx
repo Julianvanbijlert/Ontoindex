@@ -21,6 +21,7 @@ import type { TimelineEvent } from "@/components/shared/ActivityTimeline";
 import { CommentThread } from "@/components/shared/CommentThread";
 import { DefinitionRelationsSection } from "@/components/definition/DefinitionRelationsSection";
 import { DefinitionHistorySection } from "@/components/definition/DefinitionHistorySection";
+import { DefinitionStandardsFields } from "@/components/definition/DefinitionStandardsFields";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,6 +53,12 @@ import {
 import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
 import { useStandardsRuntimeSettings } from "@/hooks/use-standards-runtime-settings";
 import { evaluateDefinitionStandardsCompliance } from "@/lib/standards/compliance";
+import {
+  buildDefinitionStandardsMetadata,
+  createEmptyDefinitionStandardsMetadataDraft,
+  getDefinitionAuthoringConfig,
+  readDefinitionStandardsMetadataDraft,
+} from "@/lib/standards/authoring";
 
 export default function DefinitionDetail() {
   const { id } = useParams<{ id: string }>();
@@ -60,7 +67,13 @@ export default function DefinitionDetail() {
   const [definition, setDefinition] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [editData, setEditData] = useState({ title: "", description: "", content: "", example: "" });
+  const [editData, setEditData] = useState({
+    title: "",
+    description: "",
+    content: "",
+    example: "",
+    standards: createEmptyDefinitionStandardsMetadataDraft(),
+  });
   const [saving, setSaving] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [relationships, setRelationships] = useState<any[]>([]);
@@ -88,6 +101,10 @@ export default function DefinitionDetail() {
   const canAccessDefinitionWorkflow = canAccessWorkflow(role);
   const viewedDefinitionIdRef = useRef<string | null>(null);
   const { settings: standardsSettings } = useStandardsRuntimeSettings();
+  const definitionAuthoringConfig = useMemo(
+    () => getDefinitionAuthoringConfig(standardsSettings),
+    [standardsSettings],
+  );
 
   const fetchAll = async () => {
     if (!id) return;
@@ -126,6 +143,7 @@ export default function DefinitionDetail() {
         description: defRes.data.description || "",
         content: defRes.data.content || "",
         example: (defRes.data as any).example || "",
+        standards: readDefinitionStandardsMetadataDraft(defRes.data.metadata),
       });
       await supabase.from("definitions").update({ view_count: (defRes.data.view_count || 0) + 1 }).eq("id", id);
     }
@@ -231,6 +249,10 @@ export default function DefinitionDetail() {
       };
     }
 
+    const currentMetadata = editing
+      ? buildDefinitionStandardsMetadata(definition.metadata, editData.standards)
+      : definition.metadata;
+
     return evaluateDefinitionStandardsCompliance({
       ontologyId: definition.ontology_id,
       ontologyTitle: definition.ontologies?.title,
@@ -241,18 +263,19 @@ export default function DefinitionDetail() {
         content: editing ? editData.content : definition.content,
         example: editing ? editData.example : definition.example,
         status: definition.status,
-        metadata: definition.metadata,
+        metadata: currentMetadata,
         relationships,
       },
       settings: standardsSettings,
     });
-  }, [definition, editData.content, editData.description, editData.example, editData.title, editing, relationships, standardsSettings]);
+  }, [definition, editData.content, editData.description, editData.example, editData.standards, editData.title, editing, relationships, standardsSettings]);
 
   const handleSave = async () => {
     if (!canEditContent) { toast.error("Your current role is read-only."); return; }
     if (!definition || !editData.title.trim()) { toast.error("Title required"); return; }
     setSaving(true);
     try {
+      const nextMetadata = buildDefinitionStandardsMetadata(definition.metadata, editData.standards);
       await updateDefinition(supabase, {
         definitionId: definition.id,
         userId: user?.id,
@@ -269,12 +292,13 @@ export default function DefinitionDetail() {
           description: editData.description.trim(),
           content: editData.content.trim(),
           example: editData.example.trim(),
+          metadata: nextMetadata,
         },
         standards: {
           ontologyId: definition.ontology_id,
           ontologyTitle: definition.ontologies?.title,
           status: definition.status,
-          metadata: definition.metadata,
+          metadata: nextMetadata,
           relationships,
         },
       });
@@ -440,12 +464,18 @@ export default function DefinitionDetail() {
       />
 
       {editing && (
-        <Input
-          value={editData.title}
-          onChange={e => setEditData(p => ({ ...p, title: e.target.value }))}
-          className="text-xl font-bold"
-          placeholder="Definition title"
-        />
+        <div className="space-y-2">
+          <Label htmlFor="definition-title">{definitionAuthoringConfig.titleLabel}</Label>
+          <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.titleHint}</p>
+          <Input
+            id="definition-title"
+            aria-label={definitionAuthoringConfig.titleLabel}
+            value={editData.title}
+            onChange={e => setEditData(p => ({ ...p, title: e.target.value }))}
+            className="text-xl font-bold"
+            placeholder="Definition title"
+          />
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
@@ -462,17 +492,31 @@ export default function DefinitionDetail() {
                   {editing ? (
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Description</Label>
-                        <Textarea value={editData.description} onChange={e => setEditData(p => ({ ...p, description: e.target.value }))} rows={3} />
+                        <Label>{definitionAuthoringConfig.descriptionLabel}</Label>
+                        <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.descriptionHint}</p>
+                        <Textarea id="definition-description" aria-label={definitionAuthoringConfig.descriptionLabel} value={editData.description} onChange={e => setEditData(p => ({ ...p, description: e.target.value }))} rows={3} />
                       </div>
                       <div className="space-y-2">
-                        <Label>Context</Label>
-                        <Textarea value={editData.content} onChange={e => setEditData(p => ({ ...p, content: e.target.value }))} rows={6} className="font-mono text-sm" placeholder="Supports markdown..." />
+                        <Label>{definitionAuthoringConfig.contentLabel}</Label>
+                        <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.contentHint}</p>
+                        <Textarea id="definition-content" aria-label={definitionAuthoringConfig.contentLabel} value={editData.content} onChange={e => setEditData(p => ({ ...p, content: e.target.value }))} rows={6} className="font-mono text-sm" placeholder="Supports markdown..." />
                       </div>
                       <div className="space-y-2">
-                        <Label>Example</Label>
-                        <Textarea value={editData.example} onChange={e => setEditData(p => ({ ...p, example: e.target.value }))} rows={4} placeholder="Usage example..." />
+                        <Label>{definitionAuthoringConfig.exampleLabel}</Label>
+                        <p className="text-xs text-muted-foreground">{definitionAuthoringConfig.exampleHint}</p>
+                        <Textarea id="definition-example" aria-label={definitionAuthoringConfig.exampleLabel} value={editData.example} onChange={e => setEditData(p => ({ ...p, example: e.target.value }))} rows={4} placeholder="Usage example..." />
                       </div>
+                      <DefinitionStandardsFields
+                        config={definitionAuthoringConfig}
+                        value={editData.standards}
+                        onChange={(key, nextValue) => setEditData((current) => ({
+                          ...current,
+                          standards: {
+                            ...current.standards,
+                            [key]: nextValue,
+                          },
+                        }))}
+                      />
                     </div>
                   ) : (
                     <div className="space-y-5">
@@ -493,6 +537,36 @@ export default function DefinitionDetail() {
                           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Example</h3>
                           <div className="bg-muted/50 border border-border/50 rounded-lg p-4">
                             <MarkdownRenderer content={(definition as any).example} />
+                          </div>
+                        </div>
+                      )}
+                      {(definition.metadata?.sourceReference
+                        || definition.metadata?.sourceUrl
+                        || definition.metadata?.iri
+                        || definition.metadata?.legalBasis
+                        || definition.metadata?.section
+                        || definition.metadata?.group) && (
+                        <div>
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Standards fields</h3>
+                          <div className="space-y-2 rounded-lg border border-border/50 bg-muted/30 p-4 text-sm">
+                            {definition.metadata?.sourceReference && (
+                              <p><span className="font-medium">Source reference:</span> {definition.metadata.sourceReference}</p>
+                            )}
+                            {definition.metadata?.sourceUrl && (
+                              <p><span className="font-medium">Source URL:</span> {definition.metadata.sourceUrl}</p>
+                            )}
+                            {definition.metadata?.iri && (
+                              <p><span className="font-medium">Identifier IRI:</span> {definition.metadata.iri}</p>
+                            )}
+                            {definition.metadata?.legalBasis && (
+                              <p><span className="font-medium">Legal basis:</span> {definition.metadata.legalBasis}</p>
+                            )}
+                            {definition.metadata?.section && (
+                              <p><span className="font-medium">Section:</span> {definition.metadata.section}</p>
+                            )}
+                            {definition.metadata?.group && (
+                              <p><span className="font-medium">Group:</span> {definition.metadata.group}</p>
+                            )}
                           </div>
                         </div>
                       )}

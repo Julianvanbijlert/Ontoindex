@@ -694,6 +694,82 @@ describe("OntologyDetail", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("adapts the create-definition flow to active standards and persists source metadata", async () => {
+    mockDefinitionsData.splice(0, mockDefinitionsData.length,
+      {
+        id: "def-1",
+        title: "Access Policy",
+        description: "Definition",
+        content: "Definition content",
+        example: "",
+        metadata: {},
+        version: 1,
+        status: "approved",
+        relationships: [],
+      });
+    authState.role = "editor";
+    createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
+    updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["mim", "nl-sbb"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    createDefinitionMock.mockResolvedValue({
+      id: "def-3",
+      title: "New Definition",
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /add definition/i }));
+
+    expect(screen.getByText(/active standards shape this definition form/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/source reference/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/source url/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/identifier iri/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Definition title"), {
+      target: { value: "New Definition" },
+    });
+    fireEvent.change(screen.getByLabelText(/source reference/i), {
+      target: { value: "NORA API design guide" },
+    });
+    fireEvent.change(screen.getByLabelText(/source url/i), {
+      target: { value: "https://example.com/nora" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^create definition$/i }));
+
+    await waitFor(() => expect(createDefinitionMock).toHaveBeenCalledTimes(1));
+    expect(createDefinitionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        definition: expect.objectContaining({
+          metadata: expect.objectContaining({
+            sourceReference: "NORA API design guide",
+            sourceUrl: "https://example.com/nora",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("blocks graph rename saves when shared standards validation rejects the change", async () => {
     mockDefinitionsData.splice(0, mockDefinitionsData.length,
       {

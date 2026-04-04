@@ -35,6 +35,25 @@ function isPredefinedRelationshipType(value: string): value is PredefinedRelatio
   return predefinedRelationshipTypes.includes(value as PredefinedRelationshipType);
 }
 
+function isRecord(value: Json | null | undefined): value is Record<string, Json> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readStandardsRelationMetadata(metadata?: Json | null) {
+  if (!isRecord(metadata)) {
+    return null;
+  }
+
+  const standards = metadata.standards;
+
+  if (!isRecord(standards)) {
+    return null;
+  }
+
+  const relation = standards.relation;
+  return isRecord(relation) ? relation : null;
+}
+
 async function fetchDefinitionTitles(client: AppSupabaseClient, definitionIds: string[]) {
   const uniqueDefinitionIds = [...new Set(definitionIds.filter(Boolean))];
 
@@ -50,8 +69,27 @@ export function formatRelationshipType(value: string) {
   return value.replace(/_/g, " ");
 }
 
-export function getRelationshipDisplayLabel(type: string, label?: string | null) {
-  return label?.trim() || formatRelationshipType(type);
+export function getRelationshipDisplayLabel(type: string, label?: string | null, metadata?: Json | null) {
+  const explicitLabel = label?.trim();
+
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+
+  const relationMetadata = readStandardsRelationMetadata(metadata);
+  const metadataLabel = typeof relationMetadata?.label === "string" ? relationMetadata.label.trim() : "";
+
+  if (metadataLabel) {
+    return metadataLabel;
+  }
+
+  const metadataKind = typeof relationMetadata?.kind === "string" ? relationMetadata.kind.trim().toLowerCase() : "";
+
+  if (metadataKind === "broader" || metadataKind === "narrower" || metadataKind === "related") {
+    return metadataKind;
+  }
+
+  return formatRelationshipType(type);
 }
 
 export function buildRelationshipPayload(input: {
@@ -151,7 +189,7 @@ export async function createRelationshipRecord(
   }
 
   const titleMap = await fetchDefinitionTitles(client, [input.sourceId, input.targetId]);
-  const relationLabel = getRelationshipDisplayLabel(data.type, data.label);
+  const relationLabel = getRelationshipDisplayLabel(data.type, data.label, data.metadata);
   const sourceTitle = titleMap.get(input.sourceId) || "definition";
   const targetTitle = titleMap.get(input.targetId) || "definition";
 

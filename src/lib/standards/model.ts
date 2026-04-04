@@ -1,4 +1,4 @@
-export type StandardsProfile = "mim" | "nl-sbb" | "rdf";
+export type StandardsProfile = "mim" | "nl-sbb" | "skos" | "rdf";
 
 export interface StandardsTraceability {
   sourceIds?: string[];
