@@ -215,13 +215,15 @@ describe("validateStandardsModel", () => {
       }),
       expect.objectContaining({
         profile: "nl-sbb",
-        code: "nl_sbb_cross_scheme_relation",
-        path: "conceptRelations[relation-broader]",
-      }),
-      expect.objectContaining({
-        profile: "nl-sbb",
         code: "nl_sbb_unknown_relation_source",
         path: "conceptRelations[relation-related].sourceConceptId",
+      }),
+    ]));
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        profile: "nl-sbb",
+        code: "nl_sbb_cross_scheme_relation",
+        path: "conceptRelations[relation-broader]",
       }),
     ]));
   });

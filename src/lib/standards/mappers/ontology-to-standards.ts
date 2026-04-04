@@ -41,6 +41,14 @@ function readStringMetadata(definition: OntologyStandardsDefinition, key: string
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function readBooleanMetadata(definition: OntologyStandardsDefinition, key: string) {
+  const value = definition.metadata && typeof definition.metadata === "object" && !Array.isArray(definition.metadata)
+    ? definition.metadata[key]
+    : null;
+
+  return typeof value === "boolean" ? value : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -343,6 +351,9 @@ function toIriTerm(value: string | undefined): StandardsIriTerm | null {
 }
 
 function buildConcept(schemeId: string, definition: OntologyStandardsDefinition): StandardsConcept {
+  const topConceptOfSchemeId = readStringMetadata(definition, "topConceptOfSchemeId")
+    || (readBooleanMetadata(definition, "topConcept") ? schemeId : null);
+
   return {
     id: definition.id,
     schemeId,
@@ -352,6 +363,19 @@ function buildConcept(schemeId: string, definition: OntologyStandardsDefinition)
     definition: definition.description || undefined,
     scopeNote: definition.content || undefined,
     example: definition.example || undefined,
+    sourceReference: readStringMetadata(definition, "sourceReference")
+      || readStringMetadata(definition, "source")
+      || undefined,
+    sourceUrl: readStringMetadata(definition, "sourceUrl") ?? undefined,
+    legalBasis: readStringMetadata(definition, "legalBasis") ?? undefined,
+    legalBasisRequired: readBooleanMetadata(definition, "legalBasisRequired")
+      ?? readBooleanMetadata(definition, "regulatory")
+      ?? readBooleanMetadata(definition, "juridical")
+      ?? undefined,
+    language: readStringMetadata(definition, "language")
+      || readStringMetadata(definition, "lang")
+      || undefined,
+    topConceptOfSchemeId: topConceptOfSchemeId ?? undefined,
     status: definition.status || undefined,
     namespace: readStringMetadata(definition, "namespace") ?? undefined,
     section: readStringMetadata(definition, "section") ?? undefined,

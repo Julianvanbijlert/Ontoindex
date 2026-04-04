@@ -73,6 +73,9 @@ export interface StandardsConceptScheme {
   label: string;
   iri?: string;
   definition?: string;
+  sourceReference?: string;
+  sourceUrl?: string;
+  language?: string;
   status?: string;
   trace?: StandardsTraceability;
 }
@@ -86,6 +89,12 @@ export interface StandardsConcept {
   definition?: string;
   scopeNote?: string;
   example?: string;
+  sourceReference?: string;
+  sourceUrl?: string;
+  legalBasis?: string;
+  legalBasisRequired?: boolean;
+  language?: string;
+  topConceptOfSchemeId?: string;
   status?: string;
   namespace?: string;
   section?: string;

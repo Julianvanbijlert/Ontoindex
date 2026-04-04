@@ -83,7 +83,7 @@ describe("runStandardsValidation", () => {
         expect.objectContaining({
           standardId: "mim",
           ruleId: "mim_missing_class_label",
-          severity: "error",
+          severity: "warning",
           effectiveSeverity: "blocking",
           blocking: true,
         }),
@@ -129,6 +129,9 @@ describe("runStandardsValidation", () => {
         expect.objectContaining({
           standardId: "rdf",
           ruleId: "rdf_invalid_subject_iri",
+          category: "publication",
+          scope: "triple",
+          implementationStatus: "starter",
           profile: "rdf",
           code: "rdf_invalid_subject_iri",
           path: "triples[triple-1].subject",

@@ -19,26 +19,31 @@ function createSummary(): StandardsSummary {
 
 function finalizeFinding(input: {
   pack: StandardsPackDefinition;
-  ruleId: string;
-  defaultExplanation: string;
-  defaultSeverity: StandardsFinding["severity"];
+  rule: StandardsPackDefinition["rules"][number];
   finding: StandardsFindingInput;
   effectiveSeverity: StandardsFinding["effectiveSeverity"];
   index: number;
 }): StandardsFinding {
-  const severity = input.finding.severity || input.defaultSeverity;
+  const severity = input.finding.severity || input.rule.defaultSeverity;
 
   return {
     ...input.finding,
-    id: `${input.pack.standardId}:${input.ruleId}:${input.index}:${input.finding.path}`,
+    id: `${input.pack.standardId}:${input.rule.ruleId}:${input.index}:${input.finding.path}`,
     standardId: input.pack.standardId,
-    ruleId: input.ruleId,
-    explanation: input.finding.explanation || input.defaultExplanation,
+    ruleId: input.rule.ruleId,
+    title: input.rule.title,
+    description: input.rule.description,
+    rationale: input.rule.rationale,
+    category: input.rule.category,
+    scope: input.rule.scope,
+    requiresGlobalContext: input.rule.requiresGlobalContext,
+    implementationStatus: input.rule.implementationStatus,
+    explanation: input.finding.explanation || input.rule.explanation,
     severity,
     effectiveSeverity: input.effectiveSeverity,
     blocking: input.effectiveSeverity === "blocking",
     profile: input.pack.standardId,
-    code: input.ruleId,
+    code: input.rule.ruleId,
   };
 }
 
@@ -64,9 +69,7 @@ export function runStandardsValidation(input: RunStandardsValidationInput): RunS
             || rule.defaultSeverity;
           const finalized = finalizeFinding({
             pack,
-            ruleId: rule.ruleId,
-            defaultExplanation: rule.explanation,
-            defaultSeverity: rule.defaultSeverity,
+            rule,
             finding,
             effectiveSeverity,
             index,

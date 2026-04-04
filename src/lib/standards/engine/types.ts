@@ -3,6 +3,21 @@ import type { RelationshipSelection } from "@/lib/relationship-service";
 import type { StandardsModel, StandardsProfile } from "@/lib/standards/model";
 
 export type StandardsSeverity = "info" | "warning" | "error" | "blocking";
+export type StandardsRuleCategory = "required" | "consistency" | "publication" | "best-practice" | "placeholder";
+export type StandardsRuleScope =
+  | "package"
+  | "datatype"
+  | "class"
+  | "attribute"
+  | "identifier"
+  | "association"
+  | "conceptScheme"
+  | "concept"
+  | "conceptRelation"
+  | "triple"
+  | "model"
+  | "publication";
+export type StandardsRuleImplementationStatus = "starter" | "placeholder";
 
 export interface StandardsRuntimeSettings {
   enabledStandards: string[];
@@ -49,6 +64,13 @@ export interface StandardsFinding extends StandardsFindingInput {
   id: string;
   standardId: string;
   ruleId: string;
+  title: string;
+  description: string;
+  rationale: string;
+  category: StandardsRuleCategory;
+  scope: StandardsRuleScope;
+  requiresGlobalContext: boolean;
+  implementationStatus: StandardsRuleImplementationStatus;
   severity: StandardsSeverity;
   effectiveSeverity: StandardsSeverity;
   blocking: boolean;
@@ -60,8 +82,13 @@ export interface StandardsRuleDefinition {
   ruleId: string;
   title: string;
   description: string;
+  rationale: string;
   explanation: string;
   defaultSeverity: StandardsSeverity;
+  category: StandardsRuleCategory;
+  scope: StandardsRuleScope;
+  requiresGlobalContext: boolean;
+  implementationStatus: StandardsRuleImplementationStatus;
   validate: (context: StandardsRuleContext) => StandardsFindingInput[];
 }
 

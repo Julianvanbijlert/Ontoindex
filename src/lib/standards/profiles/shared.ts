@@ -2,7 +2,10 @@ import type {
   StandardsFindingInput,
   StandardsPackDefinition,
   StandardsRelationSuggestion,
+  StandardsRuleCategory,
   StandardsRuleContext,
+  StandardsRuleDefinition,
+  StandardsRuleScope,
   StandardsSeverity,
 } from "@/lib/standards/engine/types";
 
@@ -20,6 +23,36 @@ export function isValidBlankNodeId(value: string) {
 
 export function createFinding(input: StandardsFindingInput): StandardsFindingInput {
   return input;
+}
+
+export function createRuleDefinition(input: StandardsRuleDefinition): StandardsRuleDefinition {
+  return input;
+}
+
+export function createPlaceholderRule(input: {
+  ruleId: string;
+  title: string;
+  description: string;
+  rationale: string;
+  explanation: string;
+  defaultSeverity?: StandardsSeverity;
+  scope?: StandardsRuleScope;
+  category?: StandardsRuleCategory;
+  requiresGlobalContext?: boolean;
+}): StandardsRuleDefinition {
+  return createRuleDefinition({
+    ruleId: input.ruleId,
+    title: input.title,
+    description: input.description,
+    rationale: input.rationale,
+    explanation: input.explanation,
+    defaultSeverity: input.defaultSeverity || "warning",
+    category: input.category || "placeholder",
+    scope: input.scope || "model",
+    requiresGlobalContext: input.requiresGlobalContext ?? true,
+    implementationStatus: "placeholder",
+    validate: () => [],
+  });
 }
 
 export function createInvalidIriFinding(input: {
@@ -57,6 +90,48 @@ export function dedupeRelationSuggestions(suggestions: StandardsRelationSuggesti
   }
 
   return [...byKey.values()];
+}
+
+export function normalizeComparisonValue(value: string | undefined | null) {
+  return value?.trim().toLowerCase() || "";
+}
+
+export function isLikelyHttpUrl(value: string | undefined | null) {
+  if (!value?.trim()) {
+    return false;
+  }
+
+  return /^https?:\/\/\S+$/i.test(value.trim());
+}
+
+export function detectNamingStyle(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return "empty";
+  }
+
+  if (normalized.includes(" ")) {
+    return "spaced";
+  }
+
+  if (normalized.includes("_")) {
+    return "snake";
+  }
+
+  if (normalized.includes("-")) {
+    return "kebab";
+  }
+
+  if (/^[A-Z][A-Za-z0-9]*$/.test(normalized)) {
+    return "pascal";
+  }
+
+  if (/^[a-z][A-Za-z0-9]*$/.test(normalized)) {
+    return "camel";
+  }
+
+  return "mixed";
 }
 
 export function rulePackApplies(context: StandardsRuleContext, standardId: StandardsPackDefinition["standardId"]) {
