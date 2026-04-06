@@ -52,6 +52,24 @@ export interface DefinitionAuthoringConfig {
   sections: DefinitionAuthoringSectionConfig[];
 }
 
+export interface StandardsRelationshipAuthoringOption {
+  id: string;
+  label: string;
+  description: string;
+  selectedType: RelationshipSelection;
+  customType?: string;
+  metadata?: Json;
+  standardIds: string[];
+  isCustom: boolean;
+}
+
+export function getRelationshipAuthoringOptionValue(input: {
+  selectedType: RelationshipSelection;
+  customType?: string;
+}) {
+  return [input.selectedType, input.customType || ""].join("::");
+}
+
 function isRecord(value: Json | null | undefined): value is Record<string, Json> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -284,12 +302,14 @@ export function getDefinitionAuthoringConfig(settings: StandardsRuntimeSettings 
       : "Add supporting context, notes, or details.",
     exampleLabel: "Example",
     exampleHint: "Optional example or usage note.",
-    relationshipGuidance: hasNlSbb
-      ? "When NL-SBB is active, prefer broader, narrower, or related before falling back to generic app relations."
+    relationshipGuidance: hasNlSbb && hasSkos
+      ? "When SKOS and NL-SBB are active together, pick broader, narrower, or related from the standards-driven relationship list first. Use Custom only when no standards-shaped option fits."
+      : hasNlSbb
+        ? "When NL-SBB is active, pick broader, narrower, or related from the standards-driven relationship list first. Use Custom only when no standards-shaped option fits."
       : hasSkos
-        ? "When SKOS is active, prefer broader, narrower, or related before falling back to generic app relations."
+        ? "When SKOS is active, pick broader, narrower, or related from the standards-driven relationship list first. Use Custom only when no standards-shaped option fits."
       : hasMim
-        ? "When MIM is active, prefer structural model relations before falling back to custom labels."
+        ? "When MIM is active, pick structural model relations from the standards-driven relationship list first. Use Custom only when no standards-shaped option fits."
         : "Choose a clear relation type or use a custom relation when needed.",
     sections,
   };
@@ -328,14 +348,15 @@ function createConceptRelationChoice(input: {
 
 export function getStandardsFirstRelationshipChoices(settings: StandardsRuntimeSettings | null): StandardsRelationSuggestion[] {
   const enabledStandards = settings?.enabledStandards || [];
+  const primaryChoices: StandardsRelationSuggestion[] = [];
 
   if (enabledStandards.includes("nl-sbb")) {
-    return [
+    primaryChoices.push(
       createConceptRelationChoice({
         standardId: "nl-sbb",
         id: "nl-sbb-primary-broader",
         label: "Use broader",
-        explanation: "Recommended for concept hierarchy links where the source is broader than the target.",
+        explanation: "Recommended for Dutch concept-framework hierarchy links where the source is broader than the target.",
         selectedType: "is_a",
         kind: "broader",
         predicateKey: "broader",
@@ -345,7 +366,7 @@ export function getStandardsFirstRelationshipChoices(settings: StandardsRuntimeS
         standardId: "nl-sbb",
         id: "nl-sbb-primary-narrower",
         label: "Use narrower",
-        explanation: "Recommended when the source is the narrower concept and should retain SKOS narrower semantics.",
+        explanation: "Recommended when the source is the narrower concept and should retain generic SKOS narrower semantics inside an NL-SBB-oriented flow.",
         selectedType: CUSTOM_RELATION_TYPE,
         customType: "narrower",
         kind: "narrower",
@@ -356,22 +377,22 @@ export function getStandardsFirstRelationshipChoices(settings: StandardsRuntimeS
         standardId: "nl-sbb",
         id: "nl-sbb-primary-related",
         label: "Use related",
-        explanation: "Recommended for associative concept links without hierarchy.",
+        explanation: "Recommended for Dutch concept-framework links that are associative rather than hierarchical.",
         selectedType: "related_to",
         kind: "related",
         predicateKey: "related",
         predicateIri: "http://www.w3.org/2004/02/skos/core#related",
       }),
-    ];
+    );
   }
 
   if (enabledStandards.includes("skos")) {
-    return [
+    primaryChoices.push(
       createConceptRelationChoice({
         standardId: "skos",
         id: "skos-primary-broader",
         label: "Use broader",
-        explanation: "Recommended for SKOS hierarchy links where the source is broader than the target.",
+        explanation: "Recommended for generic SKOS concept-scheme hierarchy links where the source is broader than the target.",
         selectedType: "is_a",
         kind: "broader",
         predicateKey: "broader",
@@ -381,7 +402,7 @@ export function getStandardsFirstRelationshipChoices(settings: StandardsRuntimeS
         standardId: "skos",
         id: "skos-primary-narrower",
         label: "Use narrower",
-        explanation: "Recommended when the source is the narrower concept and should retain explicit SKOS narrower semantics.",
+        explanation: "Recommended when the source is the narrower concept and should retain explicit generic SKOS narrower semantics.",
         selectedType: CUSTOM_RELATION_TYPE,
         customType: "narrower",
         kind: "narrower",
@@ -392,17 +413,17 @@ export function getStandardsFirstRelationshipChoices(settings: StandardsRuntimeS
         standardId: "skos",
         id: "skos-primary-related",
         label: "Use related",
-        explanation: "Recommended for associative SKOS concept links without hierarchy.",
+        explanation: "Recommended for generic SKOS associative concept links without hierarchy.",
         selectedType: "related_to",
         kind: "related",
         predicateKey: "related",
         predicateIri: "http://www.w3.org/2004/02/skos/core#related",
       }),
-    ];
+    );
   }
 
   if (enabledStandards.includes("mim")) {
-    return [
+    primaryChoices.push(
       {
         id: "mim-primary-is-a",
         standardId: "mim",
@@ -424,10 +445,10 @@ export function getStandardsFirstRelationshipChoices(settings: StandardsRuntimeS
         explanation: "Recommended when the relation expresses dependency rather than hierarchy.",
         selectedType: "depends_on",
       },
-    ];
+    );
   }
 
-  return [];
+  return primaryChoices;
 }
 
 export function mergeStandardsFirstRelationshipChoices(
@@ -453,18 +474,139 @@ export function mergeStandardsFirstRelationshipChoices(
   ];
 }
 
-export function getFallbackRelationshipTypes(settings: StandardsRuntimeSettings | null) {
-  const enabledStandards = settings?.enabledStandards || [];
-  const excluded = new Set<string>();
+function relationshipSemanticsKey(choice: Pick<StandardsRelationSuggestion, "selectedType" | "customType" | "metadata">) {
+  const standardsRelation = choice.metadata
+    && typeof choice.metadata === "object"
+    && !Array.isArray(choice.metadata)
+    && choice.metadata.standards
+    && typeof choice.metadata.standards === "object"
+    && !Array.isArray(choice.metadata.standards)
+    && choice.metadata.standards.relation
+    && typeof choice.metadata.standards.relation === "object"
+    && !Array.isArray(choice.metadata.standards.relation)
+      ? choice.metadata.standards.relation
+      : null;
 
-  if (enabledStandards.includes("nl-sbb") || enabledStandards.includes("skos")) {
-    excluded.add("is_a");
-    excluded.add("related_to");
-  } else if (enabledStandards.includes("mim")) {
-    excluded.add("is_a");
-    excluded.add("part_of");
-    excluded.add("depends_on");
+  const kind = typeof standardsRelation?.kind === "string" ? standardsRelation.kind.trim().toLowerCase() : "";
+  const predicateKey = typeof standardsRelation?.predicateKey === "string"
+    ? standardsRelation.predicateKey.trim().toLowerCase()
+    : "";
+  const predicateIri = typeof standardsRelation?.predicateIri === "string"
+    ? standardsRelation.predicateIri.trim().toLowerCase()
+    : "";
+
+  return [
+    choice.selectedType,
+    choice.customType || "",
+    kind,
+    predicateKey,
+    predicateIri,
+  ].join("::");
+}
+
+function hasStandardsDrivenRelationshipChoices(settings: StandardsRuntimeSettings | null) {
+  const enabledStandards = settings?.enabledStandards || [];
+
+  return enabledStandards.includes("nl-sbb")
+    || enabledStandards.includes("skos")
+    || enabledStandards.includes("mim")
+    || enabledStandards.includes("rdf");
+}
+
+function toRelationshipOptionLabel(choice: StandardsRelationSuggestion) {
+  return choice.label.replace(/^Use\s+/i, "");
+}
+
+export function getStandardsRelationshipAuthoringOptions(input: {
+  settings: StandardsRuntimeSettings | null;
+  complianceSuggestions?: StandardsRelationSuggestion[];
+}): StandardsRelationshipAuthoringOption[] {
+  const { settings, complianceSuggestions = [] } = input;
+
+  if (!hasStandardsDrivenRelationshipChoices(settings)) {
+    return [
+      ...predefinedRelationshipTypes.map((type) => ({
+        id: `legacy-${type}`,
+        label: formatLegacyRelationshipOption(type),
+        description: "Legacy application relationship.",
+        selectedType: type,
+        standardIds: [],
+        isCustom: false,
+      })),
+      {
+        id: "custom-relationship-option",
+        label: "Custom",
+        description: "Use a custom relation when none of the predefined options fit.",
+        selectedType: CUSTOM_RELATION_TYPE,
+        standardIds: [],
+        isCustom: true,
+      },
+    ];
   }
 
-  return predefinedRelationshipTypes.filter((type) => !excluded.has(type));
+  const mergedChoices = mergeStandardsFirstRelationshipChoices(
+    getStandardsFirstRelationshipChoices(settings),
+    complianceSuggestions,
+  );
+  const bySemanticKey = new Map<string, StandardsRelationshipAuthoringOption>();
+
+  for (const choice of mergedChoices) {
+    const key = relationshipSemanticsKey(choice);
+    const existing = bySemanticKey.get(key);
+
+    if (existing) {
+      const mergedStandards = [...new Set([...existing.standardIds, choice.standardId])];
+      bySemanticKey.set(key, {
+        ...existing,
+        standardIds: mergedStandards,
+        description: existing.description,
+      });
+      continue;
+    }
+
+    bySemanticKey.set(key, {
+      id: choice.id,
+      label: toRelationshipOptionLabel(choice),
+      description: choice.explanation,
+      selectedType: choice.selectedType,
+      customType: choice.customType,
+      metadata: choice.metadata,
+      standardIds: [choice.standardId],
+      isCustom: false,
+    });
+  }
+
+  return [
+    ...bySemanticKey.values(),
+    {
+      id: "custom-relationship-option",
+      label: "Custom",
+      description: "Use a custom relation when none of the enabled standards-shaped relations fit what you need to express.",
+      selectedType: CUSTOM_RELATION_TYPE,
+      standardIds: [],
+      isCustom: true,
+    },
+  ];
+}
+
+function formatLegacyRelationshipOption(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+export function getDefaultRelationshipAuthoringSelection(settings: StandardsRuntimeSettings | null) {
+  const firstOption = getStandardsRelationshipAuthoringOptions({ settings }).find((item) => !item.isCustom);
+
+  if (firstOption) {
+    return {
+      selectedType: firstOption.selectedType,
+      customType: firstOption.customType || "",
+      metadata: firstOption.metadata || null,
+    };
+  }
+
+  return {
+    selectedType: CUSTOM_RELATION_TYPE as RelationshipSelection,
+    customType: "",
+    metadata: null,
+  };
 }

@@ -36,7 +36,7 @@ describe("RelationshipPanel", () => {
     useStandardsRuntimeSettings.mockReset();
     useStandardsRuntimeSettings.mockReturnValue({
       settings: {
-        enabledStandards: ["mim", "nl-sbb"],
+        enabledStandards: ["nl-sbb"],
         ruleOverrides: {},
       },
       loading: false,
@@ -103,7 +103,7 @@ describe("RelationshipPanel", () => {
     expect(screen.getByLabelText("Delete relationship")).toBeInTheDocument();
   });
 
-  it("renders compliant relation suggestions and keeps the custom option available", () => {
+  it("limits the relationship selector to standards-supported options plus custom when standards are enabled", () => {
     authState.role = "editor";
     evaluateRelationshipStandardsCompliance.mockReturnValue({
       findings: [
@@ -156,8 +156,12 @@ describe("RelationshipPanel", () => {
     expect(screen.getByRole("button", { name: /use narrower/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /use related/i })).toBeInTheDocument();
     expect(screen.getByText(/source is broader than the target/i)).toBeInTheDocument();
-    expect(screen.getByText(/retain skos narrower semantics/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/custom or legacy app relation/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/use this fallback when the standards-first choices do not fit/i)).toBeInTheDocument();
+    expect(screen.getByText(/generic skos narrower semantics/i)).toBeInTheDocument();
+    expect(screen.getByText(/^relationship type$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/custom or legacy app relation/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/only the enabled standards-supported relations appear here/i)).toBeInTheDocument();
+    expect(screen.getByText(/custom remains available/i)).toBeInTheDocument();
+    expect(screen.queryByText(/part of/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/depends on/i)).not.toBeInTheDocument();
   });
 });

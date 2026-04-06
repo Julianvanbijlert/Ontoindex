@@ -15,6 +15,38 @@ import { getNlSbbRelationSuggestions } from "@/lib/standards/profiles/nl-sbb/sug
 const createRule = (input: Omit<StandardsRuleDefinition, "implementationStatus"> & { implementationStatus?: StandardsRuleDefinition["implementationStatus"] }) =>
   createRuleDefinition({ ...input, implementationStatus: input.implementationStatus || "starter" });
 
+const hierarchyPredicateIriByKind = {
+  broader: "http://www.w3.org/2004/02/skos/core#broader",
+  narrower: "http://www.w3.org/2004/02/skos/core#narrower",
+  related: "http://www.w3.org/2004/02/skos/core#related",
+} as const;
+
+function isHierarchyKind(value: StandardsConceptRelation["kind"]): value is "broader" | "narrower" {
+  return value === "broader" || value === "narrower";
+}
+
+function getExpectedInverseKind(kind: "broader" | "narrower") {
+  return kind === "broader" ? "narrower" : "broader";
+}
+
+function normalizeRelationSemantic(value: string | undefined | null) {
+  const normalized = value?.trim().toLowerCase() || "";
+
+  if (normalized.endsWith("#broader") || normalized === "broader") {
+    return "broader";
+  }
+
+  if (normalized.endsWith("#narrower") || normalized === "narrower") {
+    return "narrower";
+  }
+
+  if (normalized.endsWith("#related") || normalized === "related") {
+    return "related";
+  }
+
+  return null;
+}
+
 function validateOptionalIri(findings: StandardsFindingInput[], message: string, path: string, entityKind: string, entityId: string, field: string, iri?: string) {
   if (!iri) return;
   if (!isAbsoluteIri(iri)) findings.push(createInvalidIriFinding({ message, path, entityKind, entityId, field }));
@@ -60,10 +92,51 @@ function validateRelation(item: StandardsConceptRelation, conceptsById: Map<stri
   return findings;
 }
 
+function hierarchySemanticsConsistencyFindings(model: StandardsModel) {
+  return model.conceptRelations.flatMap((relation) => {
+    if (!isHierarchyKind(relation.kind)) {
+      return [];
+    }
+
+    const predicateKeySemantic = normalizeRelationSemantic(relation.predicateKey);
+    const predicateIriSemantic = normalizeRelationSemantic(relation.predicateIri);
+    const mismatchedSemantics = [predicateKeySemantic, predicateIriSemantic]
+      .filter((value): value is "broader" | "narrower" | "related" => !!value)
+      .filter((value) => value !== relation.kind);
+
+    if (mismatchedSemantics.length === 0) {
+      return [];
+    }
+
+    const expectedPredicateIri = hierarchyPredicateIriByKind[relation.kind];
+
+    return [createFinding({
+      message: `Concept relation "${relation.id}" mixes ${relation.kind} hierarchy semantics with predicate metadata that points to ${mismatchedSemantics.join(", ")}.`,
+      path: `conceptRelations[${relation.id}]`,
+      entityKind: "conceptRelation",
+      entityId: relation.id,
+      severity: "warning",
+      explanation: `Keep explicit hierarchy metadata aligned. A ${relation.kind} relation should use the ${relation.kind} predicate metadata${expectedPredicateIri ? ` (${expectedPredicateIri})` : ""} so editors and exports read the same hierarchy meaning.`,
+      metadata: {
+        expectedKind: relation.kind,
+        predicateKey: relation.predicateKey,
+        predicateIri: relation.predicateIri,
+        mismatchedSemantics,
+      },
+    })];
+  });
+}
+
 function hierarchyCycles(model: StandardsModel) {
   const bySource = new Map<string, string[]>();
   model.conceptRelations.forEach((item) => {
-    if (item.kind === "broader" || item.kind === "narrower") bySource.set(item.sourceConceptId, [...(bySource.get(item.sourceConceptId) || []), item.targetConceptId]);
+    if (item.kind === "broader") {
+      bySource.set(item.sourceConceptId, [...(bySource.get(item.sourceConceptId) || []), item.targetConceptId]);
+    }
+
+    if (item.kind === "narrower") {
+      bySource.set(item.targetConceptId, [...(bySource.get(item.targetConceptId) || []), item.sourceConceptId]);
+    }
   });
   const findings: StandardsFindingInput[] = [];
   const visiting = new Set<string>();
@@ -105,8 +178,9 @@ function hierarchyReciprocityFindings(model: StandardsModel) {
     }
 
     const expectedKind = relation.kind === "broader" ? "narrower" : "broader";
+    const reverseHierarchyRelations = reverseRelations.filter((candidate) => isHierarchyKind(candidate.kind));
 
-    if (reverseRelations.some((candidate) => candidate.kind === expectedKind)) {
+    if (reverseHierarchyRelations.some((candidate) => candidate.kind === expectedKind)) {
       return;
     }
 
@@ -124,12 +198,81 @@ function hierarchyReciprocityFindings(model: StandardsModel) {
       entityId: relation.id,
       relatedEntityId: reverseRelations[0]?.id,
       severity: "warning",
-      explanation: "When both directions are modeled explicitly, the reverse link should use the inverse broader/narrower semantic so the hierarchy remains readable and publishable.",
+      explanation: reverseHierarchyRelations.length > 0
+        ? "When both directions are modeled explicitly, the reverse hierarchy link should use the inverse broader or narrower semantic. Replace the reverse hierarchy link so one side is broader and the other side is narrower."
+        : "A reverse relation exists, but it is not modeled as the inverse broader or narrower hierarchy link. If you keep both directions explicitly, use broader in one direction and narrower in the reverse direction.",
       metadata: {
         expectedReverseKind: expectedKind,
         reverseKinds: reverseRelations.map((item) => item.kind),
       },
     }));
+  });
+
+  return findings;
+}
+
+function topConceptHierarchyFindings(model: StandardsModel) {
+  const topConceptsById = new Map(
+    model.concepts
+      .filter((concept) => !!concept.topConceptOfSchemeId)
+      .map((concept) => [concept.id, concept]),
+  );
+
+  if (topConceptsById.size === 0) {
+    return [];
+  }
+
+  const findings: StandardsFindingInput[] = [];
+  const emitted = new Set<string>();
+
+  model.conceptRelations.forEach((relation) => {
+    const topConcept = topConceptsById.get(relation.targetConceptId);
+
+    if (topConcept && relation.kind === "broader") {
+      const key = `${topConcept.id}::${relation.id}`;
+
+      if (!emitted.has(key)) {
+        emitted.add(key);
+        findings.push(createFinding({
+          message: `Top concept "${topConcept.id}" is placed under a broader concept by relation "${relation.id}".`,
+          path: `concepts[${topConcept.id}].topConceptOfSchemeId`,
+          entityKind: "concept",
+          entityId: topConcept.id,
+          field: "topConceptOfSchemeId",
+          relatedEntityId: relation.id,
+          severity: "warning",
+          explanation: "A concept marked as a top concept should sit at the top of the scheme hierarchy. Remove the broader parent relation or remove the top-concept marker until the hierarchy is corrected.",
+          metadata: {
+            relationId: relation.id,
+            schemeId: topConcept.topConceptOfSchemeId,
+          },
+        }));
+      }
+    }
+
+    const narrowerTopConcept = topConceptsById.get(relation.sourceConceptId);
+
+    if (narrowerTopConcept && relation.kind === "narrower") {
+      const key = `${narrowerTopConcept.id}::${relation.id}`;
+
+      if (!emitted.has(key)) {
+        emitted.add(key);
+        findings.push(createFinding({
+          message: `Top concept "${narrowerTopConcept.id}" is modeled as narrower than another concept by relation "${relation.id}".`,
+          path: `concepts[${narrowerTopConcept.id}].topConceptOfSchemeId`,
+          entityKind: "concept",
+          entityId: narrowerTopConcept.id,
+          field: "topConceptOfSchemeId",
+          relatedEntityId: relation.id,
+          severity: "warning",
+          explanation: "A concept marked as a top concept should not also be modeled as narrower than another concept. Remove the narrower hierarchy relation or remove the top-concept marker until the hierarchy is corrected.",
+          metadata: {
+            relationId: relation.id,
+            schemeId: narrowerTopConcept.topConceptOfSchemeId,
+          },
+        }));
+      }
+    }
   });
 
   return findings;
@@ -157,8 +300,9 @@ const consistencyRules = [
   createRule({ ruleId: "nl_sbb_hierarchy_no_self_reference", title: "NL-SBB hierarchy should not self-reference", description: "Broader and narrower relations should not point back to the same concept.", rationale: "Self-referential hierarchy links are structurally broken.", explanation: "Remove the self-referential hierarchy link or point it to the intended related concept.", defaultSeverity: "error", category: "consistency", scope: "conceptRelation", requiresGlobalContext: false, validate: ({ model }) => { const conceptsById = new Map(model.concepts.map((item) => [item.id, item])); return model.conceptRelations.flatMap((item) => validateRelation(item, conceptsById).filter((finding) => !finding.field && !finding.severity && finding.relatedEntityId === item.targetConceptId && item.sourceConceptId === item.targetConceptId)); } }),
   createRule({ ruleId: "nl_sbb_hierarchy_cycle", title: "NL-SBB hierarchy should not form cycles", description: "Broader and narrower relations should remain acyclic in this starter pack.", rationale: "Hierarchy cycles make broader and narrower semantics ambiguous.", explanation: "Break the hierarchy cycle so the concept structure remains understandable and publishable.", defaultSeverity: "warning", category: "consistency", scope: "model", requiresGlobalContext: true, validate: ({ model }) => hierarchyCycles(model) }),
   createRule({ ruleId: "nl_sbb_broader_narrower_reciprocity", title: "NL-SBB explicit reverse hierarchy links should be reciprocal", description: "When broader or narrower links are modeled in both directions, the reverse link should use the inverse hierarchy semantic.", rationale: "Explicit reverse hierarchy links that do not mirror broader/narrower semantics make the hierarchy harder to interpret and can confuse publication mappings.", explanation: "If you model both directions explicitly, use broader in one direction and narrower in the reverse direction.", defaultSeverity: "warning", category: "consistency", scope: "model", requiresGlobalContext: true, validate: ({ model }) => hierarchyReciprocityFindings(model) }),
+  createRule({ ruleId: "nl_sbb_hierarchy_semantics_consistency", title: "NL-SBB hierarchy metadata should match the chosen hierarchy relation", description: "Broader and narrower hierarchy relations should keep predicate metadata aligned with the chosen hierarchy semantic.", rationale: "Misaligned broader/narrower metadata makes hierarchy exports and reviews harder to trust, even when the stored relation still points to valid concepts.", explanation: "Keep the hierarchy relation kind and its predicate metadata aligned so broader stays broader and narrower stays narrower everywhere the relation is projected.", defaultSeverity: "warning", category: "consistency", scope: "conceptRelation", requiresGlobalContext: false, validate: ({ model }) => hierarchySemanticsConsistencyFindings(model) }),
   createRule({ ruleId: "nl_sbb_cross_scheme_relation", title: "NL-SBB cross-scheme hierarchy warning", description: "Hierarchical links should usually stay inside one concept scheme in this starter pack.", rationale: "Cross-scheme broader and narrower links often signal scheme-boundary problems.", explanation: "Review the scheme boundaries or replace the hierarchy with a looser relation if the concepts belong to different schemes.", defaultSeverity: "warning", category: "consistency", scope: "conceptRelation", requiresGlobalContext: true, validate: ({ model }) => { const conceptsById = new Map(model.concepts.map((item) => [item.id, item])); return model.conceptRelations.flatMap((item) => validateRelation(item, conceptsById).filter((finding) => !finding.field && finding.severity === "warning" && !finding.metadata)); } }),
-  createRule({ ruleId: "nl_sbb_top_concept_consistency", title: "NL-SBB top concept marker should match scheme membership", description: "When top-concept metadata is present, it should align with the concept's own scheme.", rationale: "Mismatched top-concept markers can mislead publication tooling and editors.", explanation: "Align the top-concept marker with the concept's actual scheme or remove the marker until the scheme is confirmed.", defaultSeverity: "warning", category: "consistency", scope: "concept", requiresGlobalContext: false, validate: ({ model }) => { const schemeIds = new Set(model.conceptSchemes.map((item) => item.id)); return model.concepts.flatMap((item) => validateConcept(item, schemeIds).filter((finding) => finding.field === "topConceptOfSchemeId")); } }),
+  createRule({ ruleId: "nl_sbb_top_concept_consistency", title: "NL-SBB top concept marker should match scheme membership and hierarchy position", description: "When top-concept metadata is present, it should align with the concept's own scheme and not place the concept below a broader parent.", rationale: "Mismatched top-concept markers can mislead publication tooling and editors.", explanation: "Align the top-concept marker with the concept's actual scheme and keep the marked concept at the top of the hierarchy.", defaultSeverity: "warning", category: "consistency", scope: "concept", requiresGlobalContext: true, validate: ({ model }) => { const schemeIds = new Set(model.conceptSchemes.map((item) => item.id)); return [...model.concepts.flatMap((item) => validateConcept(item, schemeIds).filter((finding) => finding.field === "topConceptOfSchemeId")), ...topConceptHierarchyFindings(model)]; } }),
 ] satisfies StandardsRuleDefinition[];
 
 const publicationRules = [
@@ -178,7 +322,7 @@ const placeholderRules = [
 export const nlSbbStandardsPack: StandardsPackDefinition = {
   standardId: "nl-sbb",
   label: "NL-SBB",
-  description: "Starter NL-SBB catalog for concept schemes, concept quality, hierarchy integrity, and publication-oriented guidance.",
+  description: "Dutch NL-SBB starter pack for concept-framework conventions, source/legal-basis guidance, governance-oriented publication practice, and scheme quality on top of generic concept semantics.",
   getRelationSuggestions: getNlSbbRelationSuggestions,
   rules: [...requiredRules, ...consistencyRules, ...publicationRules, ...placeholderRules],
 };

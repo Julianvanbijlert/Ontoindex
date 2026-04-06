@@ -233,6 +233,10 @@ describe("Settings", () => {
     expect(screen.getByText("NL-SBB")).toBeInTheDocument();
     expect(screen.getByText("RDF")).toBeInTheDocument();
     expect(screen.getByText("SKOS")).toBeInTheDocument();
+    expect(screen.getByText(/generic concept-scheme semantics/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/dutch concept-framework guidance/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/enable skos only for generic labeling and hierarchy checks/i)).toBeInTheDocument();
+    expect(screen.getByText(/enable both when you want generic skos semantics plus dutch nl-sbb guidance/i)).toBeInTheDocument();
 
     fireEvent.mouseEnter(screen.getByRole("button", { name: /severity meanings/i }));
     expect((await screen.findAllByText(/optional guidance \/ best-practice hint/i)).length).toBeGreaterThan(0);

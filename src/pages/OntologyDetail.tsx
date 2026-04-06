@@ -62,10 +62,10 @@ import {
 import {
   buildDefinitionStandardsMetadata,
   createEmptyDefinitionStandardsMetadataDraft,
+  getDefaultRelationshipAuthoringSelection,
   getDefinitionAuthoringConfig,
-  getFallbackRelationshipTypes,
-  getStandardsFirstRelationshipChoices,
-  mergeStandardsFirstRelationshipChoices,
+  getRelationshipAuthoringOptionValue,
+  getStandardsRelationshipAuthoringOptions,
 } from "@/lib/standards/authoring";
 
 type PriorityLevel = Enums<"priority_level">;
@@ -153,6 +153,7 @@ export default function OntologyDetail() {
     () => getDefinitionAuthoringConfig(standardsSettings),
     [standardsSettings],
   );
+  const standardsDrivenRelationshipAuthoring = (standardsSettings?.enabledStandards?.length || 0) > 0;
 
   const fetchAll = async () => {
     if (!id) return;
@@ -270,16 +271,24 @@ export default function OntologyDetail() {
     },
     [definitions, graphCustomRelationType, graphRelationType, graphSuggestionMetadata, ontology?.id, ontology?.title, pendingConnection, standardsSettings],
   );
-  const graphPrimaryRelationshipChoices = useMemo(
-    () => mergeStandardsFirstRelationshipChoices(
-      getStandardsFirstRelationshipChoices(standardsSettings),
-      graphRelationshipCompliance.relationSuggestions,
-    ),
+  const graphRelationshipOptions = useMemo(
+    () => getStandardsRelationshipAuthoringOptions({
+      settings: standardsSettings,
+      complianceSuggestions: graphRelationshipCompliance.relationSuggestions,
+    }),
     [graphRelationshipCompliance.relationSuggestions, standardsSettings],
   );
-  const graphFallbackRelationshipTypes = useMemo(
-    () => getFallbackRelationshipTypes(standardsSettings),
-    [standardsSettings],
+  const graphStandardRelationshipOptions = useMemo(
+    () => graphRelationshipOptions.filter((option) => !option.isCustom),
+    [graphRelationshipOptions],
+  );
+  const selectedGraphRelationshipOption = useMemo(
+    () => graphRelationshipOptions.find((option) =>
+      getRelationshipAuthoringOptionValue(option) === getRelationshipAuthoringOptionValue({
+        selectedType: graphRelationType,
+        customType: graphCustomRelationType,
+      })),
+    [graphCustomRelationType, graphRelationType, graphRelationshipOptions],
   );
 
   const handleSaveOntology = async () => {
@@ -383,9 +392,10 @@ export default function OntologyDetail() {
     }
 
     setPendingConnection(connection);
-    setGraphRelationType("related_to");
-    setGraphCustomRelationType("");
-    setGraphSuggestionMetadata(null);
+    const initialSelection = getDefaultRelationshipAuthoringSelection(standardsSettings);
+    setGraphRelationType(initialSelection.selectedType);
+    setGraphCustomRelationType(initialSelection.customType);
+    setGraphSuggestionMetadata(initialSelection.metadata);
     setGraphRelationOpen(true);
   };
 
@@ -811,52 +821,63 @@ export default function OntologyDetail() {
                 )}
               </p>
             </div>
-            {graphPrimaryRelationshipChoices.length > 0 && (
+            {graphStandardRelationshipOptions.length > 0 && (
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Standards-first relationship choices</p>
                 <p className="text-xs text-muted-foreground">
                   {definitionAuthoringConfig.relationshipGuidance}
                 </p>
                 <div className="grid gap-2">
-                  {graphPrimaryRelationshipChoices.map((suggestion) => (
+                  {graphStandardRelationshipOptions.map((option) => (
                     <button
-                      key={suggestion.id}
+                      key={option.id}
                       type="button"
                       className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/50"
                        onClick={() => {
-                         setGraphRelationType(suggestion.selectedType);
-                         setGraphCustomRelationType(suggestion.customType || "");
-                         setGraphSuggestionMetadata(suggestion.metadata || null);
+                         setGraphRelationType(option.selectedType);
+                         setGraphCustomRelationType(option.customType || "");
+                         setGraphSuggestionMetadata(option.metadata || null);
                        }}
                     >
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground">{suggestion.label}</p>
+                        <p className="text-sm font-medium text-foreground">Use {option.label}</p>
                         <Badge variant="outline" className="bg-background/70 text-[10px]">
-                          {suggestion.standardId}
+                          {option.standardIds.join(" + ")}
                         </Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">{suggestion.explanation}</p>
+                      <p className="text-xs text-muted-foreground">{option.description}</p>
                     </button>
                   ))}
                 </div>
               </div>
             )}
             <div className="space-y-2">
-              <Label>Custom or legacy app relation</Label>
-               <Select value={graphRelationType} onValueChange={(value) => {
-                 setGraphRelationType(value as RelationshipSelection);
-                 setGraphSuggestionMetadata(null);
+              <Label>Relationship type</Label>
+               <Select value={getRelationshipAuthoringOptionValue({ selectedType: graphRelationType, customType: graphCustomRelationType })} onValueChange={(value) => {
+                 const option = graphRelationshipOptions.find((item) => getRelationshipAuthoringOptionValue(item) === value);
+
+                 if (!option) {
+                   return;
+                 }
+
+                 setGraphRelationType(option.selectedType as RelationshipSelection);
+                 setGraphCustomRelationType(option.customType || "");
+                 setGraphSuggestionMetadata(option.metadata || null);
                }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {graphFallbackRelationshipTypes.map((type) => (
-                    <SelectItem key={type} value={type}>{type.replace(/_/g, " ")}</SelectItem>
+                  {graphRelationshipOptions.map((option) => (
+                    <SelectItem key={option.id} value={getRelationshipAuthoringOptionValue(option)}>{option.label}</SelectItem>
                   ))}
-                  <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                {standardsDrivenRelationshipAuthoring
+                  ? "Only the enabled standards-supported relations appear here, plus Custom. Custom remains available when you need a non-standard relation."
+                  : "Choose one of the available relation types or use Custom when no predefined relation fits."}
+              </p>
             </div>
-            {graphRelationType === CUSTOM_RELATION_TYPE && (
+            {selectedGraphRelationshipOption?.isCustom && (
               <div className="space-y-2">
                 <Label>Custom relation type</Label>
                 <Input value={graphCustomRelationType} onChange={(event) => {

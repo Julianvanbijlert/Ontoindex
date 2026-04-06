@@ -13,21 +13,19 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { toast } from "sonner";
 import { emitAppDataChanged } from "@/lib/entity-events";
 import {
-  createRelationshipRecord,
   CUSTOM_RELATION_TYPE,
+  createRelationshipRecord,
   deleteRelationshipRecord,
-  formatRelationshipType,
   getRelationshipDisplayLabel,
-  predefinedRelationshipTypes,
 } from "@/lib/relationship-service";
 import { canManageRelationships } from "@/lib/authorization";
 import { useStandardsRuntimeSettings } from "@/hooks/use-standards-runtime-settings";
 import { evaluateRelationshipStandardsCompliance } from "@/lib/standards/compliance";
 import { StandardsFindingsPanel } from "@/components/shared/StandardsFindingsPanel";
 import {
-  getFallbackRelationshipTypes,
-  getStandardsFirstRelationshipChoices,
-  mergeStandardsFirstRelationshipChoices,
+  getDefaultRelationshipAuthoringSelection,
+  getRelationshipAuthoringOptionValue,
+  getStandardsRelationshipAuthoringOptions,
 } from "@/lib/standards/authoring";
 
 interface Relationship {
@@ -90,11 +88,12 @@ export function RelationshipPanel({
   const [targetSearch, setTargetSearch] = useState("");
   const [targetResults, setTargetResults] = useState<any[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<any>(null);
-  const [relType, setRelType] = useState<string>(predefinedRelationshipTypes[0]);
+  const [relType, setRelType] = useState<string>("related_to");
   const [customRelationType, setCustomRelationType] = useState("");
   const [selectedSuggestionMetadata, setSelectedSuggestionMetadata] = useState<Json | null>(null);
   const [creating, setCreating] = useState(false);
   const canMutateRelationships = allowCreate && canManageRelationships(role);
+  const standardsDrivenAuthoring = (settings?.enabledStandards?.length || 0) > 0;
   const relationshipCompliance = useMemo(
     () => {
       if (!settings) {
@@ -132,17 +131,52 @@ export function RelationshipPanel({
     },
     [customRelationType, entityId, entityMetadata, entityTitle, relType, selectedSuggestionMetadata, selectedTarget, settings],
   );
-  const primaryRelationshipChoices = useMemo(
-    () => mergeStandardsFirstRelationshipChoices(
-      getStandardsFirstRelationshipChoices(settings),
-      relationshipCompliance.relationSuggestions,
-    ),
+  const relationshipOptions = useMemo(
+    () => getStandardsRelationshipAuthoringOptions({
+      settings,
+      complianceSuggestions: relationshipCompliance.relationSuggestions,
+    }),
     [relationshipCompliance.relationSuggestions, settings],
   );
-  const fallbackRelationshipTypes = useMemo(
-    () => getFallbackRelationshipTypes(settings),
-    [settings],
+  const standardsRelationshipOptions = useMemo(
+    () => relationshipOptions.filter((option) => !option.isCustom),
+    [relationshipOptions],
   );
+  const selectedRelationshipOption = useMemo(
+    () => relationshipOptions.find((option) =>
+      getRelationshipAuthoringOptionValue(option) === getRelationshipAuthoringOptionValue({
+        selectedType: relType as RelationshipSelection,
+        customType: customRelationType,
+      })),
+    [customRelationType, relType, relationshipOptions],
+  );
+
+  useEffect(() => {
+    if (!dialogOpen) {
+      return;
+    }
+
+    const optionStillAvailable = relationshipOptions.some((option) => {
+      if (option.selectedType !== relType) {
+        return false;
+      }
+
+      if (option.selectedType === CUSTOM_RELATION_TYPE) {
+        return option.customType === (customRelationType || "");
+      }
+
+      return true;
+    });
+
+    if (optionStillAvailable) {
+      return;
+    }
+
+    const initialSelection = getDefaultRelationshipAuthoringSelection(settings);
+    setRelType(initialSelection.selectedType);
+    setCustomRelationType(initialSelection.customType);
+    setSelectedSuggestionMetadata(initialSelection.metadata);
+  }, [customRelationType, dialogOpen, relType, relationshipOptions, settings]);
 
   useEffect(() => {
     if (!targetSearch.trim()) { setTargetResults([]); return; }
@@ -196,7 +230,7 @@ export function RelationshipPanel({
       setTargetSearch("");
       setCustomRelationType("");
       setSelectedSuggestionMetadata(null);
-      setRelType(predefinedRelationshipTypes[0]);
+      setRelType(getDefaultRelationshipAuthoringSelection(settings).selectedType);
       emitAppDataChanged({ entityType: "relationship", action: "created", entityId: selectedTarget.id });
       onRefresh();
     } catch (error) {
@@ -241,8 +275,15 @@ export function RelationshipPanel({
         {canMutateRelationships && (
           <Dialog open={dialogOpen} onOpenChange={(open) => {
             setDialogOpen(open);
+            if (open) {
+              const initialSelection = getDefaultRelationshipAuthoringSelection(settings);
+              setRelType(initialSelection.selectedType);
+              setCustomRelationType(initialSelection.customType);
+              setSelectedSuggestionMetadata(initialSelection.metadata);
+            }
             if (!open) {
               setSelectedSuggestionMetadata(null);
+              setCustomRelationType("");
             }
           }}>
             <DialogTrigger asChild>
@@ -282,56 +323,67 @@ export function RelationshipPanel({
                     </div>
                   )}
                 </div>
-                {primaryRelationshipChoices.length > 0 && (
+                {standardsRelationshipOptions.length > 0 && (
                   <div className="space-y-2">
                     <div>
                       <p className="text-sm font-medium text-foreground">Standards-first relationship choices</p>
                       <p className="text-xs text-muted-foreground">
-                        Choose a standards-aligned relation first, or fall back to a custom or legacy app relation if you need something else.
+                        {standardsDrivenAuthoring
+                          ? "Choose one of the enabled standards-shaped relations first. Use Custom only when none of them fit what you need to express."
+                          : "Choose one of the suggested relations first. Use Custom when you need a different relation."}
                       </p>
                     </div>
                     <div className="grid gap-2">
-                      {primaryRelationshipChoices.map((suggestion) => (
+                      {standardsRelationshipOptions.map((option) => (
                         <button
-                          key={suggestion.id}
+                          key={option.id}
                           type="button"
                           className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/50"
                           onClick={() => {
-                            setRelType(suggestion.selectedType);
-                            setCustomRelationType(suggestion.customType || "");
-                            setSelectedSuggestionMetadata(suggestion.metadata || null);
+                            setRelType(option.selectedType);
+                            setCustomRelationType(option.customType || "");
+                            setSelectedSuggestionMetadata(option.metadata || null);
                           }}
                         >
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-foreground">{suggestion.label}</p>
+                            <p className="text-sm font-medium text-foreground">Use {option.label}</p>
                             <Badge variant="outline" className="bg-background/70 text-[10px]">
-                              {suggestion.standardId}
+                              {option.standardIds.join(" + ")}
                             </Badge>
                           </div>
-                          <p className="text-xs text-muted-foreground">{suggestion.explanation}</p>
+                          <p className="text-xs text-muted-foreground">{option.description}</p>
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label>Custom or legacy app relation</Label>
-                  <Select value={relType} onValueChange={(value) => {
-                    setRelType(value);
-                    setSelectedSuggestionMetadata(null);
+                  <Label>Relationship type</Label>
+                  <Select value={getRelationshipAuthoringOptionValue({ selectedType: relType as RelationshipSelection, customType: customRelationType })} onValueChange={(value) => {
+                    const option = relationshipOptions.find((item) => getRelationshipAuthoringOptionValue(item) === value);
+                    if (!option) {
+                      return;
+                    }
+
+                    setRelType(option.selectedType);
+                    setCustomRelationType(option.customType || "");
+                    setSelectedSuggestionMetadata(option.metadata || null);
                   }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {fallbackRelationshipTypes.map((type) => (
-                        <SelectItem key={type} value={type}>{formatRelationshipType(type)}</SelectItem>
+                      {relationshipOptions.map((option) => (
+                        <SelectItem key={option.id} value={getRelationshipAuthoringOptionValue(option)}>
+                          {option.label}
+                        </SelectItem>
                       ))}
-                      <SelectItem value={CUSTOM_RELATION_TYPE}>Custom type</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Use this fallback when the standards-first choices do not fit the meaning you need.
+                    {standardsDrivenAuthoring
+                      ? "Only the enabled standards-supported relations appear here, plus Custom. Custom remains available when you need a non-standard relation."
+                      : "Choose one of the available relation types or use Custom when no predefined relation fits."}
                   </p>
-                  {relType === CUSTOM_RELATION_TYPE && (
+                  {selectedRelationshipOption?.isCustom && (
                     <Input
                       placeholder="Enter a custom relation type"
                       value={customRelationType}

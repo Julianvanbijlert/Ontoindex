@@ -10,7 +10,7 @@ export function getNlSbbRelationSuggestions(context: StandardsRuleContext): Stan
       id: "nl-sbb-suggestion-broader",
       standardId: "nl-sbb",
       label: "Use broader",
-      explanation: "Recommended for hierarchical concept links in the current NL-SBB starter pack.",
+      explanation: "Recommended for Dutch concept-framework hierarchy links in the current NL-SBB starter pack.",
       selectedType: "is_a",
       metadata: {
         standards: {
@@ -26,7 +26,7 @@ export function getNlSbbRelationSuggestions(context: StandardsRuleContext): Stan
       id: "nl-sbb-suggestion-related",
       standardId: "nl-sbb",
       label: "Use related",
-      explanation: "Recommended when the concepts are associated without hierarchy.",
+      explanation: "Recommended when Dutch concept-framework terms are associated without hierarchy.",
       selectedType: "related_to",
       metadata: {
         standards: {
@@ -42,7 +42,7 @@ export function getNlSbbRelationSuggestions(context: StandardsRuleContext): Stan
       id: "nl-sbb-suggestion-narrower",
       standardId: "nl-sbb",
       label: "Use narrower",
-      explanation: "Keeps the SKOS semantics while still allowing a custom visible label.",
+      explanation: "Keeps the generic SKOS narrower semantics while still fitting the NL-SBB-oriented authoring flow.",
       selectedType: "__custom__",
       customType: "narrower",
       metadata: {

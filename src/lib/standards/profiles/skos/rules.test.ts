@@ -114,6 +114,138 @@ describe("skos standards catalog", () => {
         ]),
       );
     });
+
+    it("checks explicit related reverse links for starter symmetry without requiring inferred reverse relations", () => {
+      const result = runStandardsValidation({
+        model: createStandardsModel({
+          profiles: ["skos"],
+          conceptSchemes: [
+            {
+              id: "scheme-security",
+              label: "Security",
+              iri: "https://example.com/scheme/security",
+            },
+          ],
+          concepts: [
+            {
+              id: "concept-a",
+              schemeId: "scheme-security",
+              prefLabel: "Policy",
+              iri: "https://example.com/concepts/policy",
+            },
+            {
+              id: "concept-b",
+              schemeId: "scheme-security",
+              prefLabel: "Control",
+              iri: "https://example.com/concepts/control",
+            },
+          ],
+          conceptRelations: [
+            {
+              id: "relation-related",
+              sourceConceptId: "concept-a",
+              targetConceptId: "concept-b",
+              kind: "related",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#related",
+              predicateKey: "related",
+            },
+            {
+              id: "relation-reverse-broader",
+              sourceConceptId: "concept-b",
+              targetConceptId: "concept-a",
+              kind: "broader",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+              predicateKey: "broader",
+            },
+          ],
+        }),
+        packs: [skosStandardsPack],
+        settings: {
+          enabledStandards: ["skos"],
+          ruleOverrides: {},
+        },
+      });
+
+      expect(result.findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: "skos_related_symmetry",
+            effectiveSeverity: "warning",
+            explanation: expect.stringMatching(/both directions|related/i),
+          }),
+        ]),
+      );
+    });
+
+    it("adds starter mapping-property checks without pretending to implement a deeper mapping engine", () => {
+      const result = runStandardsValidation({
+        model: createStandardsModel({
+          profiles: ["skos"],
+          conceptSchemes: [
+            {
+              id: "scheme-security",
+              label: "Security",
+              iri: "https://example.com/scheme/security",
+            },
+            {
+              id: "scheme-reference",
+              label: "Reference",
+              iri: "https://example.com/scheme/reference",
+            },
+          ],
+          concepts: [
+            {
+              id: "concept-a",
+              schemeId: "scheme-security",
+              prefLabel: "Policy",
+              iri: "https://example.com/concepts/policy",
+            },
+            {
+              id: "concept-b",
+              schemeId: "scheme-reference",
+              prefLabel: "Rule",
+              iri: "https://example.com/concepts/rule",
+            },
+          ],
+          conceptRelations: [
+            {
+              id: "relation-mapping-mismatch",
+              sourceConceptId: "concept-a",
+              targetConceptId: "concept-b",
+              kind: "custom",
+              predicateKey: "exactMatch",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#closeMatch",
+            },
+            {
+              id: "relation-mapping-unknown",
+              sourceConceptId: "concept-a",
+              targetConceptId: "concept-b",
+              kind: "custom",
+              predicateKey: "semanticMatch",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#semanticMatch",
+            },
+          ],
+        }),
+        packs: [skosStandardsPack],
+        settings: {
+          enabledStandards: ["skos"],
+          ruleOverrides: {},
+        },
+      });
+
+      expect(result.findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: "skos_mapping_predicate_consistency",
+            effectiveSeverity: "warning",
+          }),
+          expect.objectContaining({
+            ruleId: "skos_mapping_predicate_recognition",
+            effectiveSeverity: "warning",
+          }),
+        ]),
+      );
+    });
   });
 
   describe("suggestions and placeholders", () => {

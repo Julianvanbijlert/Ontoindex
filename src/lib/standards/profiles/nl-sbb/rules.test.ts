@@ -244,6 +244,81 @@ describe("nl-sbb standards catalog", () => {
         ]),
       );
     });
+
+    it("warns when hierarchy metadata disagrees with broader or narrower semantics and when a top concept still has a broader parent", () => {
+      const result = runStandardsValidation({
+        model: createStandardsModel({
+          profiles: ["nl-sbb"],
+          conceptSchemes: [
+            {
+              id: "scheme-security",
+              label: "Security",
+              iri: "https://example.com/schemes/security",
+            },
+          ],
+          concepts: [
+            {
+              id: "concept-top",
+              schemeId: "scheme-security",
+              prefLabel: "Top concept",
+              iri: "https://example.com/security#top",
+              definition: "Top concept definition",
+              topConceptOfSchemeId: "scheme-security",
+            },
+            {
+              id: "concept-child",
+              schemeId: "scheme-security",
+              prefLabel: "Child concept",
+              iri: "https://example.com/security#child",
+              definition: "Child concept definition",
+            },
+          ],
+          conceptRelations: [
+            {
+              id: "relation-parent-child",
+              sourceConceptId: "concept-top",
+              targetConceptId: "concept-child",
+              kind: "broader",
+              predicateKey: "narrower",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#narrower",
+            },
+            {
+              id: "relation-child-top",
+              sourceConceptId: "concept-child",
+              targetConceptId: "concept-top",
+              kind: "broader",
+              predicateIri: "http://www.w3.org/2004/02/skos/core#broader",
+            },
+          ],
+        }),
+        packs: [nlSbbStandardsPack],
+        settings: {
+          enabledStandards: ["nl-sbb"],
+          ruleOverrides: {},
+        },
+      });
+
+      expect(result.findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: "nl_sbb_hierarchy_semantics_consistency",
+            path: "conceptRelations[relation-parent-child]",
+            effectiveSeverity: "warning",
+            explanation: expect.stringMatching(/predicate|broader|narrower|metadata/i),
+          }),
+          expect.objectContaining({
+            ruleId: "nl_sbb_top_concept_consistency",
+            path: "concepts[concept-top].topConceptOfSchemeId",
+            effectiveSeverity: "warning",
+            explanation: expect.stringMatching(/top concept|broader|hierarch/i),
+          }),
+          expect.objectContaining({
+            ruleId: "nl_sbb_broader_narrower_reciprocity",
+            effectiveSeverity: "warning",
+          }),
+        ]),
+      );
+    });
   });
 
   describe("publication family", () => {

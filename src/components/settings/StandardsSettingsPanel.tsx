@@ -27,6 +27,13 @@ const severityOptions: Array<{ value: StandardsSeverity; label: string }> = [
   { value: "blocking", label: "Blocking" },
 ];
 
+const usageHintsByStandardId: Record<string, string> = {
+  mim: "Enable MIM for conceptual model structure, identifier discipline, and relation consistency guidance.",
+  "nl-sbb": "Enable NL-SBB for Dutch concept-framework guidance, source and legal-basis hints, and governance-oriented publication practice. Enable both when you want generic SKOS semantics plus Dutch NL-SBB guidance.",
+  skos: "Enable SKOS only for generic labeling and hierarchy checks, or enable it with NL-SBB to combine generic concept-scheme semantics with Dutch concept-framework guidance.",
+  rdf: "Enable RDF for low-level RDF term validity and publication hygiene only.",
+};
+
 function SeverityChoiceGroup({
   ruleTitle,
   value,
@@ -139,6 +146,9 @@ export function StandardsSettingsPanel({
                             </Badge>
                           </div>
                           <CardDescription>{pack.description}</CardDescription>
+                          <p className="text-xs text-muted-foreground">
+                            {usageHintsByStandardId[pack.standardId] || "Enable this standard when its rule family matches the modeling guidance you want to enforce."}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Enable</span>

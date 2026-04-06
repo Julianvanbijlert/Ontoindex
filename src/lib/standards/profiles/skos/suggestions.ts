@@ -10,7 +10,7 @@ export function getSkosRelationSuggestions(context: StandardsRuleContext): Stand
       id: "skos-suggestion-broader",
       standardId: "skos",
       label: "Use broader",
-      explanation: "Recommended when the source concept is broader than the target concept in the current SKOS starter pack.",
+      explanation: "Recommended for generic SKOS concept-scheme hierarchy links where the source concept is broader than the target concept.",
       selectedType: "is_a",
       metadata: {
         standards: {
@@ -26,7 +26,7 @@ export function getSkosRelationSuggestions(context: StandardsRuleContext): Stand
       id: "skos-suggestion-related",
       standardId: "skos",
       label: "Use related",
-      explanation: "Recommended for associative concept links that are not hierarchical.",
+      explanation: "Recommended for generic SKOS associative concept links that are not hierarchical.",
       selectedType: "related_to",
       metadata: {
         standards: {
@@ -42,7 +42,7 @@ export function getSkosRelationSuggestions(context: StandardsRuleContext): Stand
       id: "skos-suggestion-narrower",
       standardId: "skos",
       label: "Use narrower",
-      explanation: "Recommended when the source concept is narrower and should retain explicit SKOS narrower semantics.",
+      explanation: "Recommended when the source concept is narrower and should retain explicit generic SKOS narrower semantics.",
       selectedType: "__custom__",
       customType: "narrower",
       metadata: {

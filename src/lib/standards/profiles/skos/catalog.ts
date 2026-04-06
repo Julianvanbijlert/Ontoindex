@@ -14,6 +14,54 @@ import { getSkosRelationSuggestions } from "@/lib/standards/profiles/skos/sugges
 const createRule = (input: Omit<StandardsRuleDefinition, "implementationStatus"> & { implementationStatus?: StandardsRuleDefinition["implementationStatus"] }) =>
   createRuleDefinition({ ...input, implementationStatus: input.implementationStatus || "starter" });
 
+const skosCoreIri = "http://www.w3.org/2004/02/skos/core#";
+const skosRelatedIri = `${skosCoreIri}related`;
+const skosMappingPredicates = {
+  broadmatch: {
+    key: "broadMatch",
+    iri: `${skosCoreIri}broadMatch`,
+  },
+  exactmatch: {
+    key: "exactMatch",
+    iri: `${skosCoreIri}exactMatch`,
+  },
+  closematch: {
+    key: "closeMatch",
+    iri: `${skosCoreIri}closeMatch`,
+  },
+  narrowmatch: {
+    key: "narrowMatch",
+    iri: `${skosCoreIri}narrowMatch`,
+  },
+  relatedmatch: {
+    key: "relatedMatch",
+    iri: `${skosCoreIri}relatedMatch`,
+  },
+} as const;
+
+function normalizePredicateToken(value?: string) {
+  return value?.trim().toLowerCase().replace(/[\s_-]+/g, "") || "";
+}
+
+function resolveSkosMappingPredicate(item: StandardsConceptRelation) {
+  const byKey = skosMappingPredicates[normalizePredicateToken(item.predicateKey) as keyof typeof skosMappingPredicates];
+
+  if (byKey) {
+    return byKey;
+  }
+
+  return Object.values(skosMappingPredicates).find((candidate) => candidate.iri === item.predicateIri) || null;
+}
+
+function looksLikeSkosMappingPredicate(item: StandardsConceptRelation) {
+  if (resolveSkosMappingPredicate(item)) {
+    return true;
+  }
+
+  return normalizePredicateToken(item.predicateKey).includes("match")
+    || Boolean(item.predicateIri?.startsWith(skosCoreIri) && normalizePredicateToken(item.predicateIri.split("#").pop()).includes("match"));
+}
+
 function validateOptionalIri(
   findings: StandardsFindingInput[],
   message: string,
@@ -223,6 +271,144 @@ function validateRelation(item: StandardsConceptRelation, conceptsById: Map<stri
   }
 
   return findings;
+}
+
+function relatedSymmetryFindings(model: StandardsModel) {
+  const findings: StandardsFindingInput[] = [];
+  const relationsByDirection = new Map<string, StandardsConceptRelation[]>();
+
+  model.conceptRelations.forEach((relation) => {
+    const key = `${relation.sourceConceptId}->${relation.targetConceptId}`;
+    relationsByDirection.set(key, [...(relationsByDirection.get(key) || []), relation]);
+  });
+
+  const emittedPairs = new Set<string>();
+
+  model.conceptRelations
+    .filter((relation) => relation.kind === "related")
+    .forEach((relation) => {
+      const reverseKey = `${relation.targetConceptId}->${relation.sourceConceptId}`;
+      const reverseRelations = relationsByDirection.get(reverseKey) || [];
+
+      if (reverseRelations.length === 0) {
+        return;
+      }
+
+      const hasRelatedReverse = reverseRelations.some((candidate) =>
+        candidate.kind === "related"
+        || normalizePredicateToken(candidate.predicateKey) === "related"
+        || candidate.predicateIri === skosRelatedIri);
+
+      if (hasRelatedReverse) {
+        return;
+      }
+
+      const pairKey = [relation.sourceConceptId, relation.targetConceptId].sort().join("::");
+
+      if (emittedPairs.has(pairKey)) {
+        return;
+      }
+
+      emittedPairs.add(pairKey);
+      findings.push(createFinding({
+        message: `Concepts "${relation.sourceConceptId}" and "${relation.targetConceptId}" use explicit reverse relations, but the reverse link is not modeled as SKOS related.`,
+        path: `conceptRelations[${relation.id}]`,
+        entityKind: "conceptRelation",
+        entityId: relation.id,
+        relatedEntityId: reverseRelations[0]?.id,
+        severity: "warning",
+        explanation: "If you model both directions explicitly, keep the reverse link aligned with SKOS related semantics so the association reads consistently.",
+        metadata: {
+          reverseKinds: reverseRelations.map((item) => item.kind),
+          reversePredicateKeys: reverseRelations.map((item) => item.predicateKey || null),
+        },
+      }));
+    });
+
+  return findings;
+}
+
+function mappingPredicateRecognitionFindings(model: StandardsModel) {
+  return model.conceptRelations.flatMap((relation) => {
+    if (!looksLikeSkosMappingPredicate(relation) || resolveSkosMappingPredicate(relation)) {
+      return [];
+    }
+
+    return [createFinding({
+      message: `Concept relation "${relation.id}" looks like a SKOS mapping relation, but the mapping predicate is not one of the starter-supported SKOS mapping properties.`,
+      path: `conceptRelations[${relation.id}]`,
+      entityKind: "conceptRelation",
+      entityId: relation.id,
+      severity: "warning",
+      explanation: "Use broadMatch, narrowMatch, relatedMatch, closeMatch, or exactMatch when you intend a starter SKOS mapping relation, or leave the relation as a custom predicate if it is not SKOS mapping semantics.",
+      metadata: {
+        predicateKey: relation.predicateKey || null,
+        predicateIri: relation.predicateIri || null,
+      },
+    })];
+  });
+}
+
+function mappingPredicateConsistencyFindings(model: StandardsModel) {
+  return model.conceptRelations.flatMap((relation) => {
+    const mappingPredicate = resolveSkosMappingPredicate(relation);
+
+    if (!mappingPredicate) {
+      return [];
+    }
+
+    const findings: StandardsFindingInput[] = [];
+    const normalizedKey = normalizePredicateToken(relation.predicateKey);
+
+    if (relation.kind !== "custom") {
+      findings.push(createFinding({
+        message: `Concept relation "${relation.id}" uses SKOS mapping semantics but is not stored as a custom mapped relation.`,
+        path: `conceptRelations[${relation.id}].kind`,
+        entityKind: "conceptRelation",
+        entityId: relation.id,
+        field: "kind",
+        severity: "warning",
+        explanation: "Keep starter SKOS mapping relations as custom relations with an explicit mapping predicate so they remain distinguishable from broader, narrower, and related semantics.",
+        metadata: {
+          expectedKind: "custom",
+          mappingPredicate: mappingPredicate.key,
+        },
+      }));
+    }
+
+    if (normalizedKey && normalizedKey !== normalizePredicateToken(mappingPredicate.key)) {
+      findings.push(createFinding({
+        message: `Concept relation "${relation.id}" mixes SKOS mapping key "${relation.predicateKey}" with predicate IRI "${relation.predicateIri}".`,
+        path: `conceptRelations[${relation.id}]`,
+        entityKind: "conceptRelation",
+        entityId: relation.id,
+        severity: "warning",
+        explanation: "Align the predicate key and predicate IRI so they point to the same starter SKOS mapping property.",
+        metadata: {
+          expectedPredicateKey: mappingPredicate.key,
+          expectedPredicateIri: mappingPredicate.iri,
+        },
+      }));
+    }
+
+    if (relation.predicateIri && relation.predicateIri !== mappingPredicate.iri) {
+      findings.push(createFinding({
+        message: `Concept relation "${relation.id}" uses starter SKOS mapping semantics, but the predicate IRI does not match the expected mapping property.`,
+        path: `conceptRelations[${relation.id}].predicateIri`,
+        entityKind: "conceptRelation",
+        entityId: relation.id,
+        field: "predicateIri",
+        severity: "warning",
+        explanation: "Use the canonical SKOS mapping predicate IRI that matches the intended mapping property.",
+        metadata: {
+          expectedPredicateKey: mappingPredicate.key,
+          expectedPredicateIri: mappingPredicate.iri,
+        },
+      }));
+    }
+
+    return findings;
+  });
 }
 
 function hierarchyCycles(model: StandardsModel) {
@@ -476,6 +662,42 @@ const consistencyRules = [
     },
   }),
   createRule({
+    ruleId: "skos_related_symmetry",
+    title: "SKOS explicit related reverse links should stay symmetric",
+    description: "When related links are modeled in both directions explicitly, the reverse link should also use related semantics.",
+    rationale: "SKOS related is symmetric at the semantic level, so explicit reverse links should not silently switch to hierarchy or custom semantics.",
+    explanation: "If you model both directions explicitly, use related in the reverse direction as well so the association remains consistent.",
+    defaultSeverity: "warning",
+    category: "consistency",
+    scope: "model",
+    requiresGlobalContext: true,
+    validate: ({ model }) => relatedSymmetryFindings(model),
+  }),
+  createRule({
+    ruleId: "skos_mapping_predicate_recognition",
+    title: "SKOS starter mapping predicates should use a supported property",
+    description: "Starter SKOS mapping relations should use a recognized mapping property when they look like match-style semantics.",
+    rationale: "Recognized mapping predicates keep custom mapped relations understandable without pretending to implement a deeper mapping engine.",
+    explanation: "Use one of the starter-supported SKOS mapping properties, or keep the relation clearly custom if it is not a SKOS mapping predicate.",
+    defaultSeverity: "warning",
+    category: "publication",
+    scope: "conceptRelation",
+    requiresGlobalContext: false,
+    validate: ({ model }) => mappingPredicateRecognitionFindings(model),
+  }),
+  createRule({
+    ruleId: "skos_mapping_predicate_consistency",
+    title: "SKOS starter mapping predicate key and IRI should align",
+    description: "When a starter SKOS mapping predicate is present, its key, IRI, and storage shape should stay consistent.",
+    rationale: "Consistent mapping predicate metadata makes starter publication and exchange less ambiguous.",
+    explanation: "Align the mapping predicate key, mapping predicate IRI, and custom relation storage so the intended SKOS mapping property is clear.",
+    defaultSeverity: "warning",
+    category: "publication",
+    scope: "conceptRelation",
+    requiresGlobalContext: false,
+    validate: ({ model }) => mappingPredicateConsistencyFindings(model),
+  }),
+  createRule({
     ruleId: "skos_hierarchy_cycle",
     title: "SKOS hierarchy should not form cycles",
     description: "Broader and narrower relations should remain acyclic in this starter pack.",
@@ -531,19 +753,19 @@ const placeholderRules = [
   }),
   createPlaceholderRule({
     ruleId: "skos_related_symmetry_placeholder",
-    title: "SKOS related symmetry placeholder",
-    description: "Starter placeholder for stronger related-relation symmetry checks.",
-    rationale: "Symmetry checks need a clearer authoritative SKOS catalog and, in some flows, fuller graph context than the current starter model provides.",
-    explanation: "This placeholder reserves space for future related symmetry validation.",
+    title: "SKOS deeper related symmetry placeholder",
+    description: "Starter placeholder for richer related symmetry behavior beyond explicit reverse-link checks.",
+    rationale: "The current starter rule only checks explicit reverse links. Stronger symmetry behavior would need fuller graph semantics and clearer publication expectations.",
+    explanation: "This placeholder reserves space for future related symmetry depth beyond the explicit reverse-link checks implemented in the starter pack.",
     scope: "model",
     requiresGlobalContext: true,
   }),
   createPlaceholderRule({
     ruleId: "skos_mapping_properties_placeholder",
-    title: "SKOS mapping properties placeholder",
-    description: "Starter placeholder for broaderMatch, exactMatch, closeMatch, and related mapping checks.",
-    rationale: "The current canonical model does not yet encode explicit SKOS mapping properties, so deeper mapping semantics should remain honest placeholders.",
-    explanation: "This placeholder reserves space for future SKOS mapping-property checks once the canonical model represents them directly.",
+    title: "SKOS deeper mapping semantics placeholder",
+    description: "Starter placeholder for richer broadMatch, exactMatch, closeMatch, narrowMatch, and relatedMatch semantics beyond predicate recognition.",
+    rationale: "The current canonical model can represent starter mapping predicates, but it still lacks the richer semantic context needed for stronger mapping conformance checks.",
+    explanation: "This placeholder reserves space for future mapping semantics such as stronger cross-scheme expectations, alignment depth, and publication behavior.",
     scope: "publication",
     requiresGlobalContext: false,
   }),
@@ -561,7 +783,7 @@ const placeholderRules = [
 export const skosStandardsPack: StandardsPackDefinition = {
   standardId: "skos",
   label: "SKOS",
-  description: "Starter SKOS catalog for concept schemes, labels, hierarchy integrity, and concept publication structure.",
+  description: "Generic SKOS starter pack for concept-scheme semantics, labels, hierarchy integrity, top concepts, and starter mapping behavior.",
   getRelationSuggestions: getSkosRelationSuggestions,
   rules: [...requiredRules, ...consistencyRules, ...placeholderRules],
 };

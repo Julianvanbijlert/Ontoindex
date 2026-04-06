@@ -641,6 +641,73 @@ describe("OntologyDetail", () => {
     );
   });
 
+  it("shows only standards-supported relationship choices plus custom in the graph dialog when standards are enabled", async () => {
+    mockDefinitionsData.splice(0, mockDefinitionsData.length,
+      {
+        id: "def-1",
+        title: "Access Policy",
+        description: "Definition",
+        content: "Definition content",
+        example: "",
+        metadata: {},
+        version: 1,
+        status: "approved",
+        relationships: [],
+      },
+      {
+        id: "def-2",
+        title: "Control Objective",
+        description: "Second definition",
+        content: "Control content",
+        example: "",
+        metadata: {},
+        version: 2,
+        status: "draft",
+        relationships: [],
+      });
+    authState.role = "editor";
+    createRelationshipRecordMock.mockReset();
+    createDefinitionMock.mockReset();
+    updateDefinitionMock.mockReset();
+    useStandardsRuntimeSettings.mockReturnValue({
+      settings: {
+        enabledStandards: ["nl-sbb", "skos"],
+        ruleOverrides: {},
+      },
+      loading: false,
+      error: null,
+    });
+    evaluateOntologyStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    evaluateRelationshipStandardsCompliance.mockReturnValue({
+      findings: [],
+      relationSuggestions: [],
+      hasBlockingFindings: false,
+      summary: { info: 0, warning: 0, error: 0, blocking: 0 },
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Security Ontology")).toBeInTheDocument());
+    const graphTab = screen.getByRole("tab", { name: "Graph" });
+    fireEvent.mouseDown(graphTab, { button: 0 });
+    fireEvent.mouseUp(graphTab, { button: 0 });
+    fireEvent.click(graphTab);
+    await waitFor(() => expect(graphTab).toHaveAttribute("data-state", "active"));
+
+    fireEvent.click(screen.getByRole("button", { name: "simulate-connect" }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+
+    expect(screen.getByText(/^relationship type$/i)).toBeInTheDocument();
+    expect(screen.getByText(/only the enabled standards-supported relations appear here/i)).toBeInTheDocument();
+    expect(screen.queryByText(/custom or legacy app relation/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/part of/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/depends on/i)).not.toBeInTheDocument();
+  });
+
   it("blocks shared definition creation when the standards service rejects the draft", async () => {
     mockDefinitionsData.splice(0, mockDefinitionsData.length,
       {
