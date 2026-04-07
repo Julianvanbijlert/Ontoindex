@@ -2,12 +2,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database, Json } from "@/integrations/supabase/types";
 import {
+  buildEmbeddingReindexState,
+  buildEmbeddingConfigFingerprint,
+  type EmbeddingConfigSnapshot,
+} from "@/lib/ai/embedding-config-state";
+import {
   DEFAULT_EMBEDDING_DIMENSIONS,
   DEFAULT_EMBEDDING_PROVIDER,
   defaultEmbeddingBaseUrlForProvider,
   defaultEmbeddingModelForProvider,
   normalizeEmbeddingProvider,
 } from "@/lib/ai/provider-factory";
+import { resolveEmbeddingDimensionCompatibility } from "@/lib/ai/embedding-dimensions";
 import {
   defaultLlmBaseUrlForProvider,
   defaultLlmModelForProvider,
@@ -26,6 +32,7 @@ type AppSettingsRow = Database["public"]["Tables"]["app_settings"]["Row"];
 type AppSettingsSecretsRow = Database["public"]["Tables"]["app_setting_secrets"]["Row"];
 type RuntimeSettingsTableRow = Pick<
   AppSettingsRow,
+  | "chat_ai_enabled"
   | "chat_history_limit"
   | "chat_llm_max_tokens"
   | "chat_llm_temperature"
@@ -35,6 +42,7 @@ type RuntimeSettingsTableRow = Pick<
   | "chat_similarity_expansion_enabled"
   | "chat_strict_citations_default"
 >;
+type SearchIndexJobRow = Database["public"]["Tables"]["search_index_jobs"]["Row"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -83,8 +91,113 @@ function coerceString(value: unknown, fallback: string | null = null) {
   return typeof value === "string" ? value : fallback;
 }
 
+function buildEmbeddingConfigSnapshot(input: {
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingBaseUrl: string | null;
+  vectorDimensions: number;
+  schemaDimensions: number;
+}): EmbeddingConfigSnapshot {
+  return {
+    provider: input.embeddingProvider,
+    model: input.embeddingModel,
+    baseUrl: input.embeddingBaseUrl,
+    vectorDimensions: input.vectorDimensions,
+    schemaDimensions: input.schemaDimensions,
+  };
+}
+
+function buildResolvedEmbeddingInput(source: Record<string, unknown>, fallbackProvider: string) {
+  const embeddingProvider = normalizeEmbeddingProvider(coerceString(source.embeddingProvider, fallbackProvider));
+  const embeddingModel = coerceString(
+    source.embeddingModel,
+    defaultEmbeddingModelForProvider(embeddingProvider),
+  ) || (defaultEmbeddingModelForProvider(embeddingProvider) || "");
+  const embeddingBaseUrl = coerceString(
+    source.embeddingBaseUrl,
+    defaultEmbeddingBaseUrlForProvider(embeddingProvider),
+  );
+  const vectorDimensions = Math.max(
+    1,
+    Math.round(coerceNumber(source.vectorDimensions, DEFAULT_EMBEDDING_DIMENSIONS)),
+  );
+  const schemaDimensions = Math.max(
+    1,
+    Math.round(coerceNumber(source.schemaDimensions, vectorDimensions)),
+  );
+
+  return {
+    embeddingProvider,
+    embeddingModel,
+    embeddingBaseUrl,
+    vectorDimensions,
+    schemaDimensions,
+  };
+}
+
+function isLmStudioEndpointConfigured(model: string | null | undefined, baseUrl: string | null | undefined) {
+  return Boolean(model?.trim()) && Boolean(baseUrl?.trim());
+}
+
+export interface LocalAiModeStatus {
+  mode: "fully_local" | "partially_local" | "not_local" | "incomplete_local";
+  chatLocal: boolean;
+  embeddingsLocal: boolean;
+  warning: string | null;
+}
+
+export function getLocalAiModeStatus(settings: AdminChatSettings): LocalAiModeStatus {
+  const chatSelected = settings.provider.llmProvider === "lmstudio";
+  const embeddingSelected = settings.embeddings.embeddingProvider === "lmstudio";
+  const chatLocal = chatSelected && isLmStudioEndpointConfigured(
+    settings.provider.llmModel,
+    settings.provider.llmBaseUrl,
+  );
+  const embeddingsLocal = embeddingSelected && isLmStudioEndpointConfigured(
+    settings.embeddings.embeddingModel,
+    settings.embeddings.embeddingBaseUrl,
+  );
+
+  if (chatLocal && embeddingsLocal) {
+    return {
+      mode: "fully_local",
+      chatLocal: true,
+      embeddingsLocal: true,
+      warning: null,
+    };
+  }
+
+  if ((chatSelected && !chatLocal) || (embeddingSelected && !embeddingsLocal)) {
+    return {
+      mode: "incomplete_local",
+      chatLocal,
+      embeddingsLocal,
+      warning: "LM Studio local mode is incomplete. Set both model and base URL for chat and embeddings.",
+    };
+  }
+
+  if (chatLocal || embeddingsLocal) {
+    return {
+      mode: "partially_local",
+      chatLocal,
+      embeddingsLocal,
+      warning: chatLocal
+        ? "Chat is local but embeddings are not configured for LM Studio."
+        : "Embeddings are local but chat is not configured for LM Studio.",
+    };
+  }
+
+  return {
+    mode: "not_local",
+    chatLocal: false,
+    embeddingsLocal: false,
+    warning: null,
+  };
+}
+
 export function defaultChatRuntimeSettings(): ChatRuntimeSettings {
   return {
+    aiEnabled: true,
     enableSimilarityExpansion: true,
     strictCitationsDefault: true,
     historyMessageLimit: 12,
@@ -112,6 +225,7 @@ export function parseChatRuntimeSettings(payload: Json | null | undefined): Chat
     : {};
 
   return {
+    aiEnabled: coerceBoolean(source.aiEnabled, true),
     enableSimilarityExpansion: coerceBoolean(source.similarityExpansion, true),
     strictCitationsDefault: coerceBoolean(source.strictCitationsDefault, true),
     historyMessageLimit: Math.max(1, coerceNumber(source.historyMessageLimit, 12)),
@@ -131,12 +245,122 @@ export function parseAdminChatSettings(payload: Json | null | undefined): AdminC
   const embeddings = source.embeddings && typeof source.embeddings === "object" && !Array.isArray(source.embeddings)
     ? source.embeddings as Record<string, unknown>
     : {};
+  const activeRetrieval = embeddings.activeRetrieval
+    && typeof embeddings.activeRetrieval === "object"
+    && !Array.isArray(embeddings.activeRetrieval)
+    ? embeddings.activeRetrieval as Record<string, unknown>
+    : {};
+  const embeddingReindexState = embeddings.reindexState
+    && typeof embeddings.reindexState === "object"
+    && !Array.isArray(embeddings.reindexState)
+    ? embeddings.reindexState as Record<string, unknown>
+    : {};
   const providerKeys = source.providerKeys && typeof source.providerKeys === "object" && !Array.isArray(source.providerKeys)
     ? source.providerKeys as Record<string, unknown>
     : {};
   const runtime = source.runtime && typeof source.runtime === "object" && !Array.isArray(source.runtime)
     ? source.runtime as Record<string, unknown>
     : {};
+
+  const selectedEmbedding = buildResolvedEmbeddingInput(embeddings, DEFAULT_EMBEDDING_PROVIDER);
+  const activeEmbedding = buildResolvedEmbeddingInput(
+    activeRetrieval,
+    selectedEmbedding.embeddingProvider,
+  );
+  const vectorDimensions = selectedEmbedding.vectorDimensions;
+  const schemaDimensions = selectedEmbedding.schemaDimensions;
+  const dimensionCompatibility = resolveEmbeddingDimensionCompatibility(vectorDimensions, schemaDimensions);
+  const embeddingProvider = selectedEmbedding.embeddingProvider;
+  const embeddingModel = selectedEmbedding.embeddingModel;
+  const embeddingBaseUrl = selectedEmbedding.embeddingBaseUrl;
+  const reindexState = buildEmbeddingReindexState({
+    selectedConfig: buildEmbeddingConfigSnapshot({
+      embeddingProvider: selectedEmbedding.embeddingProvider,
+      embeddingModel: selectedEmbedding.embeddingModel,
+      embeddingBaseUrl: selectedEmbedding.embeddingBaseUrl,
+      vectorDimensions: selectedEmbedding.vectorDimensions,
+      schemaDimensions: selectedEmbedding.schemaDimensions,
+    }),
+    activeConfig: buildEmbeddingConfigSnapshot({
+      embeddingProvider: activeEmbedding.embeddingProvider,
+      embeddingModel: activeEmbedding.embeddingModel,
+      embeddingBaseUrl: activeEmbedding.embeddingBaseUrl,
+      vectorDimensions: activeEmbedding.vectorDimensions,
+      schemaDimensions: activeEmbedding.schemaDimensions,
+    }),
+    activeFingerprint: coerceString(
+      embeddingReindexState.activeFingerprint,
+      coerceString(activeRetrieval.fingerprint, null),
+    ),
+    selectedFingerprint: coerceString(
+      embeddingReindexState.selectedFingerprint,
+      null,
+    ),
+    required: coerceBoolean(
+      embeddingReindexState.required,
+      coerceBoolean(embeddings.reindexRequired, false),
+    ),
+    status: coerceString(
+      embeddingReindexState.status,
+      null,
+    ),
+    lastIndexedFingerprint: coerceString(
+      embeddingReindexState.lastIndexedFingerprint,
+      coerceString(embeddings.lastIndexedFingerprint, null),
+    ),
+    lastIndexedAt: coerceString(
+      embeddingReindexState.lastIndexedAt,
+      coerceString(embeddings.lastIndexedAt, null),
+    ),
+    activeGenerationId: coerceString(
+      embeddingReindexState.activeGenerationId,
+      coerceString(activeRetrieval.generationId, null),
+    ),
+    selectedGenerationId: coerceString(
+      embeddingReindexState.selectedGenerationId,
+      coerceString(embeddingReindexState.pendingGenerationId, coerceString(activeRetrieval.generationId, null)),
+    ),
+    pendingGenerationId: coerceString(
+      embeddingReindexState.pendingGenerationId,
+      null,
+    ),
+    pendingJobId: coerceString(
+      embeddingReindexState.pendingJobId,
+      coerceString(embeddings.pendingJobId, null),
+    ),
+    pendingJobStatus: coerceString(
+      embeddingReindexState.pendingJobStatus,
+      coerceString(embeddings.pendingJobStatus, null),
+    ),
+    totalDocuments: typeof embeddingReindexState.totalDocuments === "number"
+      ? embeddingReindexState.totalDocuments
+      : typeof embeddings.totalDocuments === "number"
+        ? embeddings.totalDocuments
+        : null,
+    processedDocuments: typeof embeddingReindexState.processedDocuments === "number"
+      ? embeddingReindexState.processedDocuments
+      : typeof embeddings.processedDocuments === "number"
+        ? embeddings.processedDocuments
+        : null,
+    remainingDocuments: typeof embeddingReindexState.remainingDocuments === "number"
+      ? embeddingReindexState.remainingDocuments
+      : typeof embeddings.remainingDocuments === "number"
+        ? embeddings.remainingDocuments
+        : null,
+    progressPercent: typeof embeddingReindexState.progressPercent === "number"
+      ? embeddingReindexState.progressPercent
+      : typeof embeddings.progressPercent === "number"
+        ? embeddings.progressPercent
+        : null,
+    lastError: coerceString(
+      embeddingReindexState.lastError,
+      coerceString(embeddings.lastError, null),
+    ),
+    message: coerceString(
+      embeddingReindexState.message,
+      coerceString(embeddings.reindexMessage, null),
+    ),
+  });
 
   return {
     provider: {
@@ -156,15 +380,9 @@ export function parseAdminChatSettings(payload: Json | null | undefined): AdminC
       apiKeyUpdatedAt: coerceString(provider.apiKeyUpdatedAt, null),
     },
     embeddings: {
-      embeddingProvider: normalizeEmbeddingProvider(coerceString(embeddings.embeddingProvider, DEFAULT_EMBEDDING_PROVIDER)),
-      embeddingModel: coerceString(
-        embeddings.embeddingModel,
-        defaultEmbeddingModelForProvider(coerceString(embeddings.embeddingProvider, DEFAULT_EMBEDDING_PROVIDER)),
-      ) || (defaultEmbeddingModelForProvider(coerceString(embeddings.embeddingProvider, DEFAULT_EMBEDDING_PROVIDER)) || ""),
-      embeddingBaseUrl: coerceString(
-        embeddings.embeddingBaseUrl,
-        defaultEmbeddingBaseUrlForProvider(coerceString(embeddings.embeddingProvider, DEFAULT_EMBEDDING_PROVIDER)),
-      ),
+      embeddingProvider,
+      embeddingModel,
+      embeddingBaseUrl,
       fallbackProvider: coerceString(embeddings.fallbackProvider, "huggingface"),
       fallbackModel: coerceString(
         embeddings.fallbackModel,
@@ -174,7 +392,29 @@ export function parseAdminChatSettings(payload: Json | null | undefined): AdminC
         embeddings.fallbackBaseUrl,
         defaultEmbeddingBaseUrlForProvider(coerceString(embeddings.fallbackProvider, "huggingface")),
       ),
-      vectorDimensions: Math.max(1, Math.round(coerceNumber(embeddings.vectorDimensions, DEFAULT_EMBEDDING_DIMENSIONS))),
+      vectorDimensions,
+      schemaDimensions,
+      dimensionCompatibility,
+      activeRetrieval: {
+        embeddingProvider: activeEmbedding.embeddingProvider,
+        embeddingModel: activeEmbedding.embeddingModel,
+        embeddingBaseUrl: activeEmbedding.embeddingBaseUrl,
+        vectorDimensions: activeEmbedding.vectorDimensions,
+        schemaDimensions: activeEmbedding.schemaDimensions,
+        generationId: coerceString(activeRetrieval.generationId, null),
+        fingerprint: coerceString(
+          activeRetrieval.fingerprint,
+          buildEmbeddingConfigFingerprint(buildEmbeddingConfigSnapshot({
+            embeddingProvider: activeEmbedding.embeddingProvider,
+            embeddingModel: activeEmbedding.embeddingModel,
+            embeddingBaseUrl: activeEmbedding.embeddingBaseUrl,
+            vectorDimensions: activeEmbedding.vectorDimensions,
+            schemaDimensions: activeEmbedding.schemaDimensions,
+          })),
+        ) || "",
+        activatedAt: coerceString(activeRetrieval.activatedAt, null),
+      },
+      reindexState,
     },
     providerKeys: {
       deepseek: {
@@ -194,6 +434,7 @@ export function parseAdminChatSettings(payload: Json | null | undefined): AdminC
       },
     },
     runtime: {
+      aiEnabled: coerceBoolean(runtime.aiEnabled, true),
       enableSimilarityExpansion: coerceBoolean(runtime.enableSimilarityExpansion, true),
       strictCitationsDefault: coerceBoolean(runtime.strictCitationsDefault, true),
       historyLimit: Math.max(1, coerceNumber(runtime.historyLimit, 12)),
@@ -214,6 +455,14 @@ function sanitizeAdminChatSettingsInput(input: AdminChatSettingsUpdateInput): Ad
   const fallbackProvider = input.embeddings.fallbackProvider
     ? normalizeEmbeddingProvider(input.embeddings.fallbackProvider)
     : "huggingface";
+  const vectorDimensions = Math.max(
+    1,
+    Math.round(Number.isFinite(input.embeddings.vectorDimensions) ? input.embeddings.vectorDimensions : DEFAULT_EMBEDDING_DIMENSIONS),
+  );
+  const schemaDimensions = Math.max(
+    1,
+    Math.round(Number.isFinite(input.embeddings.schemaDimensions) ? input.embeddings.schemaDimensions : DEFAULT_EMBEDDING_DIMENSIONS),
+  );
 
   return {
     provider: {
@@ -235,12 +484,11 @@ function sanitizeAdminChatSettingsInput(input: AdminChatSettingsUpdateInput): Ad
         || null,
       fallbackBaseUrl: input.embeddings.fallbackBaseUrl?.trim()
         || defaultEmbeddingBaseUrlForProvider(fallbackProvider),
-      vectorDimensions: Math.max(
-        1,
-        Math.round(Number.isFinite(input.embeddings.vectorDimensions) ? input.embeddings.vectorDimensions : DEFAULT_EMBEDDING_DIMENSIONS),
-      ),
+      vectorDimensions,
+      schemaDimensions,
     },
     runtime: {
+      aiEnabled: typeof input.runtime.aiEnabled === "boolean" ? input.runtime.aiEnabled : true,
       enableSimilarityExpansion: Boolean(input.runtime.enableSimilarityExpansion),
       strictCitationsDefault: Boolean(input.runtime.strictCitationsDefault),
       historyLimit: Math.max(1, Math.round(Number.isFinite(input.runtime.historyLimit) ? input.runtime.historyLimit : 12)),
@@ -264,8 +512,36 @@ function sanitizeAdminChatSettingsInput(input: AdminChatSettingsUpdateInput): Ad
 function mapRowsToAdminChatSettings(
   settingsRow: Partial<AppSettingsRow> | null | undefined,
   secretsRow: Partial<AppSettingsSecretsRow> | null | undefined,
+  pendingJob?: Partial<SearchIndexJobRow> | null,
 ) {
   const llmProvider = normalizeLlmProviderName(settingsRow?.chat_llm_provider || DEFAULT_LLM_PROVIDER);
+  const embeddingProvider = settingsRow?.embedding_provider || DEFAULT_EMBEDDING_PROVIDER;
+  const embeddingModel = settingsRow?.embedding_model
+    || defaultEmbeddingModelForProvider(settingsRow?.embedding_provider || DEFAULT_EMBEDDING_PROVIDER);
+  const embeddingBaseUrl = settingsRow?.embedding_base_url
+    || defaultEmbeddingBaseUrlForProvider(settingsRow?.embedding_provider || DEFAULT_EMBEDDING_PROVIDER);
+  const vectorDimensions = settingsRow?.embedding_vector_dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+  const schemaDimensions = settingsRow?.embedding_schema_dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+  const activeEmbeddingProvider = settingsRow?.active_embedding_provider || embeddingProvider;
+  const activeEmbeddingModel = settingsRow?.active_embedding_model || embeddingModel;
+  const activeEmbeddingBaseUrl = settingsRow?.active_embedding_base_url || embeddingBaseUrl;
+  const activeVectorDimensions = settingsRow?.active_embedding_vector_dimensions ?? vectorDimensions;
+  const activeSchemaDimensions = settingsRow?.active_embedding_schema_dimensions ?? schemaDimensions;
+  const activeFingerprint = settingsRow?.active_embedding_fingerprint
+    || buildEmbeddingConfigFingerprint(buildEmbeddingConfigSnapshot({
+      embeddingProvider: activeEmbeddingProvider,
+      embeddingModel: activeEmbeddingModel || "",
+      embeddingBaseUrl: activeEmbeddingBaseUrl,
+      vectorDimensions: activeVectorDimensions,
+      schemaDimensions: activeSchemaDimensions,
+    }));
+  const selectedFingerprint = buildEmbeddingConfigFingerprint(buildEmbeddingConfigSnapshot({
+    embeddingProvider,
+    embeddingModel: embeddingModel || "",
+    embeddingBaseUrl,
+    vectorDimensions,
+    schemaDimensions,
+  }));
 
   return parseAdminChatSettings({
     provider: {
@@ -279,13 +555,34 @@ function mapRowsToAdminChatSettings(
       apiKeyUpdatedAt: typeof secretsRow?.updated_at === "string" ? secretsRow.updated_at : null,
     },
     embeddings: {
-      embeddingProvider: settingsRow?.embedding_provider || DEFAULT_EMBEDDING_PROVIDER,
-      embeddingModel: settingsRow?.embedding_model || defaultEmbeddingModelForProvider(settingsRow?.embedding_provider || DEFAULT_EMBEDDING_PROVIDER),
-      embeddingBaseUrl: settingsRow?.embedding_base_url || defaultEmbeddingBaseUrlForProvider(settingsRow?.embedding_provider || DEFAULT_EMBEDDING_PROVIDER),
+      embeddingProvider,
+      embeddingModel,
+      embeddingBaseUrl,
       fallbackProvider: settingsRow?.embedding_fallback_provider || "huggingface",
       fallbackModel: settingsRow?.embedding_fallback_model || defaultEmbeddingModelForProvider(settingsRow?.embedding_fallback_provider || "huggingface"),
       fallbackBaseUrl: settingsRow?.embedding_fallback_base_url || defaultEmbeddingBaseUrlForProvider(settingsRow?.embedding_fallback_provider || "huggingface"),
-      vectorDimensions: settingsRow?.embedding_vector_dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS,
+      vectorDimensions,
+      schemaDimensions,
+      activeRetrieval: {
+        embeddingProvider: activeEmbeddingProvider,
+        embeddingModel: activeEmbeddingModel,
+        embeddingBaseUrl: activeEmbeddingBaseUrl,
+        vectorDimensions: activeVectorDimensions,
+        schemaDimensions: activeSchemaDimensions,
+        generationId: settingsRow?.active_embedding_generation_id || null,
+        fingerprint: activeFingerprint,
+        activatedAt: typeof settingsRow?.active_embedding_activated_at === "string"
+          ? settingsRow.active_embedding_activated_at
+          : null,
+      },
+      reindexRequired: settingsRow?.embedding_reindex_required ?? (selectedFingerprint !== activeFingerprint),
+      lastIndexedFingerprint: settingsRow?.embedding_last_indexed_fingerprint || activeFingerprint,
+      lastIndexedAt: typeof settingsRow?.embedding_last_indexed_at === "string" ? settingsRow.embedding_last_indexed_at : null,
+      activeGenerationId: settingsRow?.active_embedding_generation_id || null,
+      selectedGenerationId: settingsRow?.embedding_pending_generation_id || settingsRow?.active_embedding_generation_id || null,
+      pendingGenerationId: settingsRow?.embedding_pending_generation_id || null,
+      pendingJobId: typeof pendingJob?.id === "string" ? pendingJob.id : null,
+      pendingJobStatus: typeof pendingJob?.status === "string" ? pendingJob.status : null,
     },
     providerKeys: {
       deepseek: {
@@ -305,6 +602,7 @@ function mapRowsToAdminChatSettings(
       },
     },
     runtime: {
+      aiEnabled: settingsRow?.chat_ai_enabled ?? true,
       enableSimilarityExpansion: settingsRow?.chat_similarity_expansion_enabled ?? true,
       strictCitationsDefault: settingsRow?.chat_strict_citations_default ?? true,
       historyLimit: settingsRow?.chat_history_limit ?? 12,
@@ -320,6 +618,7 @@ async function loadRuntimeSettingsFromTables(client: AppSupabaseClient) {
     .from("app_settings")
     .select([
       "id",
+      "chat_ai_enabled",
       "chat_similarity_expansion_enabled",
       "chat_strict_citations_default",
       "chat_history_limit",
@@ -339,6 +638,7 @@ async function loadRuntimeSettingsFromTables(client: AppSupabaseClient) {
   }
 
   return parseChatRuntimeSettings({
+    aiEnabled: data?.chat_ai_enabled ?? true,
     similarityExpansion: data?.chat_similarity_expansion_enabled ?? true,
     strictCitationsDefault: data?.chat_strict_citations_default ?? true,
     historyMessageLimit: data?.chat_history_limit ?? 12,
@@ -354,6 +654,7 @@ async function loadAdminSettingsFromTables(client: AppSupabaseClient) {
       .from("app_settings")
       .select([
         "id",
+        "chat_ai_enabled",
         "chat_llm_provider",
         "chat_llm_model",
         "chat_llm_base_url",
@@ -366,6 +667,19 @@ async function loadAdminSettingsFromTables(client: AppSupabaseClient) {
         "embedding_fallback_model",
         "embedding_fallback_base_url",
         "embedding_vector_dimensions",
+        "embedding_schema_dimensions",
+        "embedding_reindex_required",
+        "embedding_last_indexed_fingerprint",
+        "embedding_last_indexed_at",
+        "active_embedding_provider",
+        "active_embedding_model",
+        "active_embedding_base_url",
+        "active_embedding_vector_dimensions",
+        "active_embedding_schema_dimensions",
+        "active_embedding_generation_id",
+        "active_embedding_fingerprint",
+        "active_embedding_activated_at",
+        "embedding_pending_generation_id",
         "chat_similarity_expansion_enabled",
         "chat_strict_citations_default",
         "chat_history_limit",
@@ -401,6 +715,61 @@ async function updateAdminSettingsThroughTables(
   input: AdminChatSettingsUpdateInput,
 ) {
   const sanitized = sanitizeAdminChatSettingsInput(input);
+  const currentSettingsResponse = await client
+    .from("app_settings")
+    .select([
+      "id",
+      "embedding_provider",
+      "embedding_model",
+      "embedding_base_url",
+      "embedding_vector_dimensions",
+      "embedding_schema_dimensions",
+      "embedding_reindex_required",
+      "embedding_last_indexed_fingerprint",
+      "embedding_last_indexed_at",
+      "active_embedding_provider",
+      "active_embedding_model",
+      "active_embedding_base_url",
+      "active_embedding_vector_dimensions",
+      "active_embedding_schema_dimensions",
+      "active_embedding_generation_id",
+      "active_embedding_fingerprint",
+      "active_embedding_activated_at",
+      "embedding_pending_generation_id",
+    ].join(","))
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (currentSettingsResponse.error && !isSchemaMissingError(currentSettingsResponse.error)) {
+    throw currentSettingsResponse.error;
+  }
+
+  const currentSettings = currentSettingsResponse.data as Partial<AppSettingsRow> | null;
+  const nextEmbeddingConfig = buildEmbeddingConfigSnapshot({
+    embeddingProvider: sanitized.embeddings.embeddingProvider,
+    embeddingModel: sanitized.embeddings.embeddingModel,
+    embeddingBaseUrl: sanitized.embeddings.embeddingBaseUrl,
+    vectorDimensions: sanitized.embeddings.vectorDimensions,
+    schemaDimensions: sanitized.embeddings.schemaDimensions,
+  });
+  const nextEmbeddingFingerprint = buildEmbeddingConfigFingerprint(nextEmbeddingConfig);
+  const currentEmbeddingFingerprint = currentSettings
+    ? buildEmbeddingConfigFingerprint(buildEmbeddingConfigSnapshot({
+        embeddingProvider: currentSettings.embedding_provider || DEFAULT_EMBEDDING_PROVIDER,
+        embeddingModel: currentSettings.embedding_model
+          || defaultEmbeddingModelForProvider(currentSettings.embedding_provider || DEFAULT_EMBEDDING_PROVIDER)
+          || "",
+        embeddingBaseUrl: currentSettings.embedding_base_url
+          || defaultEmbeddingBaseUrlForProvider(currentSettings.embedding_provider || DEFAULT_EMBEDDING_PROVIDER),
+        vectorDimensions: currentSettings.embedding_vector_dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS,
+        schemaDimensions: currentSettings.embedding_schema_dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS,
+      }))
+    : nextEmbeddingFingerprint;
+  const lastIndexedFingerprint = currentSettings?.embedding_last_indexed_fingerprint || currentEmbeddingFingerprint;
+  const embeddingConfigChanged = currentEmbeddingFingerprint !== nextEmbeddingFingerprint;
+  const reindexRequired = embeddingConfigChanged
+    ? lastIndexedFingerprint !== nextEmbeddingFingerprint
+    : Boolean(currentSettings?.embedding_reindex_required);
   const settingsPayload = {
     id: 1,
     allow_self_role_change: true,
@@ -416,8 +785,22 @@ async function updateAdminSettingsThroughTables(
     embedding_fallback_model: sanitized.embeddings.fallbackModel,
     embedding_fallback_base_url: sanitized.embeddings.fallbackBaseUrl,
     embedding_vector_dimensions: sanitized.embeddings.vectorDimensions,
+    embedding_schema_dimensions: sanitized.embeddings.schemaDimensions,
+    embedding_reindex_required: reindexRequired,
+    embedding_last_indexed_fingerprint: currentSettings?.embedding_last_indexed_fingerprint || nextEmbeddingFingerprint,
+    embedding_last_indexed_at: currentSettings?.embedding_last_indexed_at || new Date().toISOString(),
+    active_embedding_provider: currentSettings?.active_embedding_provider || currentSettings?.embedding_provider || sanitized.embeddings.embeddingProvider,
+    active_embedding_model: currentSettings?.active_embedding_model || currentSettings?.embedding_model || sanitized.embeddings.embeddingModel,
+    active_embedding_base_url: currentSettings?.active_embedding_base_url || currentSettings?.embedding_base_url || sanitized.embeddings.embeddingBaseUrl,
+    active_embedding_vector_dimensions: currentSettings?.active_embedding_vector_dimensions ?? currentSettings?.embedding_vector_dimensions ?? sanitized.embeddings.vectorDimensions,
+    active_embedding_schema_dimensions: currentSettings?.active_embedding_schema_dimensions ?? currentSettings?.embedding_schema_dimensions ?? sanitized.embeddings.schemaDimensions,
+    active_embedding_generation_id: currentSettings?.active_embedding_generation_id || null,
+    active_embedding_fingerprint: currentSettings?.active_embedding_fingerprint || currentEmbeddingFingerprint,
+    active_embedding_activated_at: currentSettings?.active_embedding_activated_at || currentSettings?.embedding_last_indexed_at || new Date().toISOString(),
+    embedding_pending_generation_id: embeddingConfigChanged ? (currentSettings?.embedding_pending_generation_id || nextEmbeddingFingerprint) : null,
     chat_similarity_expansion_enabled: sanitized.runtime.enableSimilarityExpansion,
     chat_strict_citations_default: sanitized.runtime.strictCitationsDefault,
+    chat_ai_enabled: sanitized.runtime.aiEnabled,
     chat_history_limit: sanitized.runtime.historyLimit,
     chat_max_evidence_items: sanitized.runtime.maxEvidenceItems,
     chat_runtime_temperature: sanitized.runtime.temperature,
@@ -430,6 +813,20 @@ async function updateAdminSettingsThroughTables(
 
   if (settingsError) {
     throw settingsError;
+  }
+
+  if (embeddingConfigChanged && reindexRequired) {
+    try {
+      await client.rpc("enqueue_search_index_job", {
+        _job_type: "embed_stale_documents",
+        _metadata: {
+          reason: "embedding_config_changed",
+          embeddingConfigFingerprint: nextEmbeddingFingerprint,
+        },
+      });
+    } catch {
+      // Older fallback schemas may not expose the backend-owned job RPC.
+    }
   }
 
   if (sanitized.clearApiKey || typeof sanitized.apiKey === "string") {
@@ -545,9 +942,11 @@ export async function updateAdminChatSettings(
         fallbackModel: sanitized.embeddings.fallbackModel,
         fallbackBaseUrl: sanitized.embeddings.fallbackBaseUrl,
         vectorDimensions: sanitized.embeddings.vectorDimensions,
+        schemaDimensions: sanitized.embeddings.schemaDimensions,
       },
       providerKeys: sanitized.providerKeys,
       runtime: {
+        aiEnabled: sanitized.runtime.aiEnabled,
         enableSimilarityExpansion: sanitized.runtime.enableSimilarityExpansion,
         strictCitationsDefault: sanitized.runtime.strictCitationsDefault,
         historyLimit: sanitized.runtime.historyLimit,

@@ -41,6 +41,7 @@ export async function buildChatEvidencePack(
         .from("definitions")
         .select("id, title, description, content, ontology_id, ontologies(title)")
         .in("id", definitionIds)
+        .eq("status", "approved")
         .eq("is_deleted", false)
       : Promise.resolve({ data: [], error: null }),
     ontologyIds.length > 0
@@ -48,6 +49,7 @@ export async function buildChatEvidencePack(
         .from("ontologies")
         .select("id, title, description")
         .in("id", ontologyIds)
+        .eq("status", "approved")
       : Promise.resolve({ data: [], error: null }),
     selectedResults.length > 0
       ? client

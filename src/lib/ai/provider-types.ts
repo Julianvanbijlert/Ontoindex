@@ -2,12 +2,17 @@ export type EmbeddingProvider =
   | "gemini"
   | "deepseek"
   | "huggingface"
-  | "local";
+  | "local"
+  | "lmstudio";
 
 export type ChatProvider =
   | "deepseek"
   | "gemini"
-  | "mock";
+  | "mock"
+  | "openai"
+  | "openai-compatible"
+  | "anthropic"
+  | "lmstudio";
 
 export interface ProviderSecretStatus {
   configured: boolean;

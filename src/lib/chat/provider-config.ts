@@ -4,6 +4,7 @@ import {
   DEFAULT_DEEPSEEK_BASE_URL,
   DEFAULT_GEMINI_BASE_URL,
   DEFAULT_GEMINI_CHAT_MODEL,
+  DEFAULT_LMSTUDIO_BASE_URL,
   DEFAULT_OPENAI_BASE_URL,
   defaultChatModelForProvider,
   normalizeBaseUrl,
@@ -24,6 +25,7 @@ export const SUPPORTED_LLM_PROVIDERS = [
   "openai",
   "openai-compatible",
   "anthropic",
+  "lmstudio",
 ] as const;
 
 export type SupportedLlmProvider = (typeof SUPPORTED_LLM_PROVIDERS)[number];
@@ -67,6 +69,8 @@ export function defaultLlmModelForProvider(
       return DEFAULT_OPENAI_COMPATIBLE_LLM_MODEL;
     case "anthropic":
       return DEFAULT_ANTHROPIC_LLM_MODEL;
+    case "lmstudio":
+      return "";
     default:
       return fallbackModel;
   }
@@ -80,8 +84,12 @@ export function defaultLlmBaseUrlForProvider(provider: string | null | undefined
       return DEFAULT_GEMINI_BASE_URL;
     case "openai":
       return DEFAULT_OPENAI_BASE_URL;
+    case "openai-compatible":
+      return DEFAULT_OPENAI_BASE_URL;
     case "anthropic":
       return DEFAULT_ANTHROPIC_BASE_URL;
+    case "lmstudio":
+      return DEFAULT_LMSTUDIO_BASE_URL;
     default:
       return null;
   }
@@ -96,7 +104,8 @@ export function resolveLlmProviderRuntimeConfig(env: Record<string, string | und
   const apiKey = env.LLM_API_KEY
     || (provider === "deepseek" ? env.DEEPSEEK_API_KEY : null)
     || (provider === "gemini" ? (env.GEMINI_API_KEY || env.GOOGLE_API_KEY) : null)
-    || (provider === "openai" ? env.OPENAI_API_KEY : null);
+    || (provider === "openai" ? env.OPENAI_API_KEY : null)
+    || (provider === "anthropic" ? env.ANTHROPIC_API_KEY : null);
   const apiKeySource = env.LLM_API_KEY
     ? "LLM_API_KEY"
     : provider === "deepseek" && env.DEEPSEEK_API_KEY
@@ -107,6 +116,8 @@ export function resolveLlmProviderRuntimeConfig(env: Record<string, string | und
           ? "GOOGLE_API_KEY"
           : provider === "openai" && env.OPENAI_API_KEY
             ? "OPENAI_API_KEY"
+            : provider === "anthropic" && env.ANTHROPIC_API_KEY
+              ? "ANTHROPIC_API_KEY"
             : null;
 
   return {

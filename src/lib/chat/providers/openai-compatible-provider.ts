@@ -10,7 +10,7 @@ interface OpenAiCompatibleProviderOptions {
   name: string;
   family?: string;
   model: string;
-  apiKey: string;
+  apiKey: string | null;
   baseUrl?: string | null;
   capabilities?: Partial<LlmProviderCapabilities>;
 }
@@ -70,7 +70,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   protected readonly defaultModel: string;
 
   private readonly model: string;
-  private readonly apiKey: string;
+  private readonly apiKey: string | null;
   private readonly baseUrl: string;
 
   constructor(options: OpenAiCompatibleProviderOptions) {
@@ -93,12 +93,17 @@ export class OpenAiCompatibleProvider implements LlmProvider {
   }
 
   async generate(input: LlmGenerationInput): Promise<LlmGenerationResult> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    if (this.apiKey) {
+      headers.Authorization = `Bearer ${this.apiKey}`;
+    }
+
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
         model: input.model || this.model,
         temperature: input.temperature,

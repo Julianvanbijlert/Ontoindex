@@ -76,6 +76,10 @@ function parseExpandedQueries(content: string, originalQuery: string) {
   }
 }
 
+function providerRequiresApiKey(provider: string) {
+  return provider !== "gemini" && provider !== "lmstudio" && provider !== "mock";
+}
+
 async function requireUser(request: Request) {
   const authClient = createClient(supabaseUrl, supabaseAnonKey, {
     global: {
@@ -128,11 +132,19 @@ Deno.serve(async (request) => {
 
     const config = readSearchQueryExpansionConfig(aiRuntimeRows);
 
-    if (!config.apiKey) {
+    const missingModel = !config.model?.trim();
+    const missingBaseUrl = config.provider !== "mock" && !config.baseUrl?.trim();
+    const missingApiKey = providerRequiresApiKey(config.provider) && !config.apiKey;
+
+    if (missingModel || missingBaseUrl || missingApiKey) {
       return new Response(JSON.stringify({
-        error: config.provider === "gemini"
-          ? "Query expansion provider not configured. Set GEMINI_API_KEY or GOOGLE_API_KEY."
-          : "Query expansion provider not configured.",
+        error: missingModel
+          ? "Query expansion provider is missing a model."
+          : missingBaseUrl
+            ? "Query expansion provider is missing a base URL."
+            : config.provider === "gemini"
+              ? "Query expansion provider not configured. Set GEMINI_API_KEY or GOOGLE_API_KEY."
+              : "Query expansion provider not configured.",
         code: "provider_not_configured",
         provider: config.provider,
         model: config.model,
@@ -170,8 +182,8 @@ Deno.serve(async (request) => {
       : fetch(`${config.baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${config.apiKey}`,
             "Content-Type": "application/json",
+            ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
           },
           body: JSON.stringify({
             model: config.model,

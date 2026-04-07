@@ -5,7 +5,7 @@ import { GeminiProvider } from "./providers/gemini-provider.ts";
 import { MockProvider } from "./providers/mock-provider.ts";
 import { OpenAiCompatibleProvider } from "./providers/openai-compatible-provider.ts";
 import { OpenAiProvider } from "./providers/openai-provider.ts";
-import type { LlmProvider } from "./types.ts";
+import type { ChatCompletionInput, ChatModelProvider, LlmProvider } from "./types.ts";
 
 export function createLlmProvider(config: LlmProviderRuntimeConfig): LlmProvider {
   switch (config.provider) {
@@ -46,6 +46,13 @@ export function createLlmProvider(config: LlmProviderRuntimeConfig): LlmProvider
         apiKey: config.apiKey,
         baseUrl: config.baseUrl,
       });
+    case "lmstudio":
+      return new OpenAiCompatibleProvider({
+        name: "lmstudio",
+        model: config.model,
+        apiKey: null,
+        baseUrl: config.baseUrl,
+      });
     case "anthropic":
       if (!config.apiKey) {
         throw new Error("LLM_API_KEY is required for the Anthropic provider.");
@@ -63,4 +70,22 @@ export function createLlmProvider(config: LlmProviderRuntimeConfig): LlmProvider
 
 export function createLlmProviderFromEnv(env: Record<string, string | undefined>) {
   return createLlmProvider(resolveLlmProviderRuntimeConfig(env));
+}
+
+export function createChatModelProvider(config: LlmProviderRuntimeConfig): ChatModelProvider {
+  const provider = createLlmProvider(config);
+
+  return {
+    info: {
+      provider: config.provider,
+      model: config.model,
+      family: provider.info.family,
+      baseUrl: provider.info.baseUrl ?? null,
+    },
+    complete: (input: ChatCompletionInput) =>
+      provider.generate({
+        ...input,
+        model: input.model || config.model,
+      }),
+  };
 }

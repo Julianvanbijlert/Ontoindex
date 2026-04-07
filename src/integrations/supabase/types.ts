@@ -67,6 +67,7 @@ export type Database = {
       app_settings: {
         Row: {
           allow_self_role_change: boolean
+          chat_ai_enabled: boolean
           chat_history_limit: number
           chat_llm_base_url: string | null
           chat_llm_max_tokens: number
@@ -79,12 +80,25 @@ export type Database = {
           chat_similarity_expansion_enabled: boolean
           chat_strict_citations_default: boolean
           created_at: string
+          active_embedding_activated_at: string | null
+          active_embedding_base_url: string | null
+          active_embedding_fingerprint: string | null
+          active_embedding_generation_id: string | null
+          active_embedding_model: string | null
+          active_embedding_provider: string | null
+          active_embedding_schema_dimensions: number | null
+          active_embedding_vector_dimensions: number | null
           embedding_base_url: string | null
           embedding_fallback_base_url: string | null
           embedding_fallback_model: string | null
           embedding_fallback_provider: string
+          embedding_pending_generation_id: string | null
+          embedding_last_indexed_at: string | null
+          embedding_last_indexed_fingerprint: string | null
           embedding_model: string
           embedding_provider: string
+          embedding_reindex_required: boolean
+          embedding_schema_dimensions: number
           embedding_vector_dimensions: number
           id: number
           standards_settings: Json | null
@@ -93,6 +107,7 @@ export type Database = {
         }
         Insert: {
           allow_self_role_change?: boolean
+          chat_ai_enabled?: boolean
           chat_history_limit?: number
           chat_llm_base_url?: string | null
           chat_llm_max_tokens?: number
@@ -105,12 +120,25 @@ export type Database = {
           chat_similarity_expansion_enabled?: boolean
           chat_strict_citations_default?: boolean
           created_at?: string
+          active_embedding_activated_at?: string | null
+          active_embedding_base_url?: string | null
+          active_embedding_fingerprint?: string | null
+          active_embedding_generation_id?: string | null
+          active_embedding_model?: string | null
+          active_embedding_provider?: string | null
+          active_embedding_schema_dimensions?: number | null
+          active_embedding_vector_dimensions?: number | null
           embedding_base_url?: string | null
           embedding_fallback_base_url?: string | null
           embedding_fallback_model?: string | null
           embedding_fallback_provider?: string
+          embedding_pending_generation_id?: string | null
+          embedding_last_indexed_at?: string | null
+          embedding_last_indexed_fingerprint?: string | null
           embedding_model?: string
           embedding_provider?: string
+          embedding_reindex_required?: boolean
+          embedding_schema_dimensions?: number
           embedding_vector_dimensions?: number
           id?: number
           standards_settings?: Json | null
@@ -119,6 +147,7 @@ export type Database = {
         }
         Update: {
           allow_self_role_change?: boolean
+          chat_ai_enabled?: boolean
           chat_history_limit?: number
           chat_llm_base_url?: string | null
           chat_llm_max_tokens?: number
@@ -131,12 +160,25 @@ export type Database = {
           chat_similarity_expansion_enabled?: boolean
           chat_strict_citations_default?: boolean
           created_at?: string
+          active_embedding_activated_at?: string | null
+          active_embedding_base_url?: string | null
+          active_embedding_fingerprint?: string | null
+          active_embedding_generation_id?: string | null
+          active_embedding_model?: string | null
+          active_embedding_provider?: string | null
+          active_embedding_schema_dimensions?: number | null
+          active_embedding_vector_dimensions?: number | null
           embedding_base_url?: string | null
           embedding_fallback_base_url?: string | null
           embedding_fallback_model?: string | null
           embedding_fallback_provider?: string
+          embedding_pending_generation_id?: string | null
+          embedding_last_indexed_at?: string | null
+          embedding_last_indexed_fingerprint?: string | null
           embedding_model?: string
           embedding_provider?: string
+          embedding_reindex_required?: boolean
+          embedding_schema_dimensions?: number
           embedding_vector_dimensions?: number
           id?: number
           standards_settings?: Json | null
@@ -988,6 +1030,8 @@ export type Database = {
           created_at: string
           debug_metadata: Json
           embedding: string | null
+          embedding_dimensions: number | null
+          embedding_provider: string | null
           expires_at: string
           hit_count: number
           model: string | null
@@ -1004,6 +1048,8 @@ export type Database = {
           created_at?: string
           debug_metadata?: Json
           embedding?: string | null
+          embedding_dimensions?: number | null
+          embedding_provider?: string | null
           expires_at?: string
           hit_count?: number
           model?: string | null
@@ -1020,6 +1066,8 @@ export type Database = {
           created_at?: string
           debug_metadata?: Json
           embedding?: string | null
+          embedding_dimensions?: number | null
+          embedding_provider?: string | null
           expires_at?: string
           hit_count?: number
           model?: string | null
@@ -1037,6 +1085,101 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      search_document_embeddings: {
+        Row: {
+          created_at: string
+          embedding: string | null
+          embedding_dimensions: number | null
+          embedding_model: string | null
+          embedding_provider: string | null
+          embedding_updated_at: string
+          generation_fingerprint: string
+          generation_id: string
+          search_document_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          embedding?: string | null
+          embedding_dimensions?: number | null
+          embedding_model?: string | null
+          embedding_provider?: string | null
+          embedding_updated_at?: string
+          generation_fingerprint: string
+          generation_id: string
+          search_document_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          embedding?: string | null
+          embedding_dimensions?: number | null
+          embedding_model?: string | null
+          embedding_provider?: string | null
+          embedding_updated_at?: string
+          generation_fingerprint?: string
+          generation_id?: string
+          search_document_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_document_embeddings_generation_id_fkey"
+            columns: ["generation_id"]
+            isOneToOne: false
+            referencedRelation: "search_embedding_generations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      search_embedding_generations: {
+        Row: {
+          activated_at: string | null
+          base_url: string | null
+          completed_at: string | null
+          created_at: string
+          fingerprint: string
+          id: string
+          last_error: string | null
+          model: string
+          provider: string
+          schema_dimensions: number
+          status: string
+          updated_at: string
+          vector_dimensions: number
+        }
+        Insert: {
+          activated_at?: string | null
+          base_url?: string | null
+          completed_at?: string | null
+          created_at?: string
+          fingerprint: string
+          id: string
+          last_error?: string | null
+          model: string
+          provider: string
+          schema_dimensions: number
+          status?: string
+          updated_at?: string
+          vector_dimensions: number
+        }
+        Update: {
+          activated_at?: string | null
+          base_url?: string | null
+          completed_at?: string | null
+          created_at?: string
+          fingerprint?: string
+          id?: string
+          last_error?: string | null
+          model?: string
+          provider?: string
+          schema_dimensions?: number
+          status?: string
+          updated_at?: string
+          vector_dimensions?: number
+        }
+        Relationships: []
       }
       search_index_jobs: {
         Row: {
@@ -1462,14 +1605,30 @@ export type Database = {
         }
         Returns: string
       }
+      activate_search_embedding_generation: {
+        Args: {
+          _generation_id: string
+        }
+        Returns: Json
+      }
       list_stale_search_documents: {
         Args: {
+          _generation_id?: string | null
           _limit?: number
         }
         Returns: {
           id: string
           search_text: string
         }[]
+      }
+      mark_search_embeddings_reindexed: {
+        Args: {
+          _embedding_config_fingerprint: string
+          _embedding_dimensions?: number | null
+          _embedding_model?: string | null
+          _embedding_provider?: string | null
+        }
+        Returns: undefined
       }
       save_search_history: {
         Args: {

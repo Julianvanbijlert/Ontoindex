@@ -3,6 +3,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import {
   fetchAdminChatSettings,
+  getLocalAiModeStatus,
   updateAdminChatSettings,
 } from "@/lib/chat-admin-settings-service";
 import {
@@ -13,7 +14,12 @@ import {
   defaultLlmBaseUrlForProvider,
   defaultLlmModelForProvider,
 } from "@/lib/chat/provider-config";
-import { defaultEmbeddingBaseUrlForProvider } from "@/lib/ai/provider-factory";
+import {
+  defaultEmbeddingBaseUrlForProvider,
+  defaultEmbeddingModelForProvider,
+} from "@/lib/ai/provider-factory";
+import { REINDEX_PROGRESS_POLL_INTERVAL_MS } from "@/lib/ai/admin-settings-polling";
+import { validateLmStudioSettings } from "@/lib/ai/lmstudio-validation";
 import type { AdminChatSettings } from "@/lib/chat/types";
 import type { StandardsRuntimeSettings, StandardsSeverity } from "@/lib/standards/engine/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +46,8 @@ export default function Settings() {
   const [chatSettingsLoading, setChatSettingsLoading] = useState(false);
   const [chatSettingsSaving, setChatSettingsSaving] = useState(false);
   const [chatSettingsError, setChatSettingsError] = useState<string | null>(null);
+  const [lmStudioValidation, setLmStudioValidation] = useState<Awaited<ReturnType<typeof validateLmStudioSettings>> | null>(null);
+  const [lmStudioValidationLoading, setLmStudioValidationLoading] = useState(false);
   const [standardsSettings, setStandardsSettings] = useState<StandardsRuntimeSettings | null>(null);
   const [standardsSettingsLoading, setStandardsSettingsLoading] = useState(false);
   const [standardsSettingsSaving, setStandardsSettingsSaving] = useState(false);
@@ -56,6 +64,42 @@ export default function Settings() {
     group_by_preference: profile?.group_by_preference || "name",
   });
   const canManageChatSettings = canManageUsers(role);
+  const localEmbeddingConfigWarning = chatSettings?.embeddings.embeddingProvider === "local"
+    && (
+      !chatSettings.embeddings.embeddingModel.trim()
+      || !chatSettings.embeddings.embeddingBaseUrl?.trim()
+    )
+    ? "Local embeddings require both a model and a base URL for an OpenAI-compatible /embeddings endpoint."
+    : null;
+  const localAiModeStatus = chatSettings ? getLocalAiModeStatus(chatSettings) : null;
+  const hasLmStudioSelection = chatSettings
+    ? chatSettings.provider.llmProvider === "lmstudio"
+      || chatSettings.embeddings.embeddingProvider === "lmstudio"
+    : false;
+  const embeddingReindexWarning = chatSettings?.embeddings.reindexState?.required
+    ? chatSettings.embeddings.reindexState.message
+      || "Search embeddings need to be rebuilt for the active embedding configuration."
+    : null;
+  const embeddingReindexState = chatSettings?.embeddings.reindexState ?? null;
+  const showEmbeddingProgress = Boolean(
+    embeddingReindexState
+      && (
+        embeddingReindexState.progressStatus === "queued"
+        || embeddingReindexState.progressStatus === "processing"
+        || embeddingReindexState.progressStatus === "activating"
+        || embeddingReindexState.progressStatus === "failed"
+        || embeddingReindexState.required
+      ),
+  );
+  const shouldPollEmbeddingProgress = canManageChatSettings
+    && adminTab === "ai"
+    && !chatSettingsSaving
+    && showEmbeddingProgress;
+  const embeddingProgressValue = embeddingReindexState?.progressPercent ?? (embeddingReindexState?.required ? 0 : 100);
+  const embeddingProgressCountText = embeddingReindexState?.totalDocuments && embeddingReindexState.processedDocuments !== null && embeddingReindexState.processedDocuments !== undefined
+    ? `${embeddingReindexState.processedDocuments} of ${embeddingReindexState.totalDocuments} documents ready`
+    : null;
+  const activeEmbeddingConfig = chatSettings?.embeddings.activeRetrieval || null;
 
   useEffect(() => {
     if (!canManageChatSettings) {
@@ -114,6 +158,51 @@ export default function Settings() {
     };
   }, [canManageChatSettings]);
 
+  useEffect(() => {
+    setLmStudioValidation(null);
+  }, [
+    chatSettings?.provider.llmProvider,
+    chatSettings?.provider.llmModel,
+    chatSettings?.provider.llmBaseUrl,
+    chatSettings?.embeddings.embeddingProvider,
+    chatSettings?.embeddings.embeddingModel,
+    chatSettings?.embeddings.embeddingBaseUrl,
+  ]);
+
+  useEffect(() => {
+    if (!shouldPollEmbeddingProgress) {
+      return;
+    }
+
+    let active = true;
+    const intervalId = window.setInterval(() => {
+      fetchAdminChatSettings(supabase)
+        .then((settings) => {
+          if (!active) {
+            return;
+          }
+
+          setChatSettings((current) => current ? ({
+            ...current,
+            embeddings: {
+              ...current.embeddings,
+              activeRetrieval: settings.embeddings.activeRetrieval,
+              reindexState: settings.embeddings.reindexState,
+            },
+          }) : settings);
+          setChatSettingsError(null);
+        })
+        .catch(() => {
+          // Keep the last known progress visible; the next successful poll will reconcile it.
+        });
+    }, REINDEX_PROGRESS_POLL_INTERVAL_MS);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [shouldPollEmbeddingProgress, chatSettingsSaving]);
+
   const handleSave = async () => {
     if (!profile) return;
     setSaving(true);
@@ -121,6 +210,20 @@ export default function Settings() {
     if (error) toast.error(error.message);
     else { toast.success("Settings saved"); await refreshProfile(); }
     setSaving(false);
+  };
+
+  const handleValidateLmStudio = async () => {
+    if (!chatSettings) {
+      return;
+    }
+
+    setLmStudioValidationLoading(true);
+    try {
+      const result = await validateLmStudioSettings(supabase, chatSettings);
+      setLmStudioValidation(result);
+    } finally {
+      setLmStudioValidationLoading(false);
+    }
   };
 
   const handleSaveChatSettings = async () => {
@@ -146,8 +249,10 @@ export default function Settings() {
           fallbackModel: chatSettings.embeddings.fallbackModel,
           fallbackBaseUrl: chatSettings.embeddings.fallbackBaseUrl,
           vectorDimensions: chatSettings.embeddings.vectorDimensions,
+          schemaDimensions: chatSettings.embeddings.schemaDimensions,
         },
         runtime: {
+          aiEnabled: chatSettings.runtime.aiEnabled,
           enableSimilarityExpansion: chatSettings.runtime.enableSimilarityExpansion,
           strictCitationsDefault: chatSettings.runtime.strictCitationsDefault,
           historyLimit: chatSettings.runtime.historyLimit,
@@ -204,8 +309,10 @@ export default function Settings() {
           fallbackModel: chatSettings.embeddings.fallbackModel,
           fallbackBaseUrl: chatSettings.embeddings.fallbackBaseUrl,
           vectorDimensions: chatSettings.embeddings.vectorDimensions,
+          schemaDimensions: chatSettings.embeddings.schemaDimensions,
         },
         runtime: {
+          aiEnabled: chatSettings.runtime.aiEnabled,
           enableSimilarityExpansion: chatSettings.runtime.enableSimilarityExpansion,
           strictCitationsDefault: chatSettings.runtime.strictCitationsDefault,
           historyLimit: chatSettings.runtime.historyLimit,
@@ -435,7 +542,7 @@ export default function Settings() {
             ) : chatSettings ? (
               <>
                 <div className="space-y-1">
-                  <h3 className="text-sm font-medium">Chat Generation</h3>
+                  <h3 className="text-sm font-medium">Chat Settings</h3>
                   <p className="text-xs text-muted-foreground">
                     Configure the primary chat provider. Gemini is the default because it is the most reliable provider in this environment, and chat falls back to another configured provider when available.
                   </p>
@@ -463,6 +570,7 @@ export default function Settings() {
                       <SelectItem value="openai">OpenAI</SelectItem>
                       <SelectItem value="openai-compatible">OpenAI-Compatible</SelectItem>
                       <SelectItem value="anthropic">Anthropic</SelectItem>
+                      <SelectItem value="lmstudio">LM Studio</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -601,7 +709,7 @@ export default function Settings() {
                 </div>
 
                 <div className="space-y-1 border-t border-border/50 pt-4">
-                  <h3 className="text-sm font-medium">Embeddings</h3>
+                  <h3 className="text-sm font-medium">Embedding Settings</h3>
                   <p className="text-xs text-muted-foreground">
                     Configure semantic search embeddings separately from chat generation. Gemini is the default primary provider and HuggingFace is the default fallback.
                   </p>
@@ -617,8 +725,10 @@ export default function Settings() {
                         embeddings: {
                           ...current.embeddings,
                           embeddingProvider: value,
-                          embeddingModel: current.embeddings.embeddingModel || "",
-                          embeddingBaseUrl: defaultEmbeddingBaseUrlForProvider(value) || current.embeddings.embeddingBaseUrl,
+                          embeddingModel: defaultEmbeddingModelForProvider(value)
+                            || current.embeddings.embeddingModel
+                            || "",
+                          embeddingBaseUrl: defaultEmbeddingBaseUrlForProvider(value),
                         },
                       }) : current)}
                     >
@@ -628,6 +738,7 @@ export default function Settings() {
                         <SelectItem value="deepseek">DeepSeek</SelectItem>
                         <SelectItem value="huggingface">HuggingFace</SelectItem>
                         <SelectItem value="local">Local</SelectItem>
+                        <SelectItem value="lmstudio">LM Studio</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -678,6 +789,212 @@ export default function Settings() {
                     />
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <Label>Schema Dimensions</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={chatSettings.embeddings.schemaDimensions}
+                    onChange={(event) => setChatSettings((current) => current ? ({
+                      ...current,
+                      embeddings: {
+                        ...current.embeddings,
+                        schemaDimensions: parseNumericInput(event.target.value, current.embeddings.schemaDimensions),
+                      },
+                    }) : current)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Match this to the vector size used in the database schema.
+                  </p>
+                </div>
+
+                {chatSettings.embeddings.dimensionCompatibility?.mismatch && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {chatSettings.embeddings.dimensionCompatibility.message}
+                  </div>
+                )}
+
+                {localEmbeddingConfigWarning && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    {localEmbeddingConfigWarning}
+                  </div>
+                )}
+
+                <div className="space-y-1 border-t border-border/50 pt-4">
+                  <h3 className="text-sm font-medium">AI Status</h3>
+                  <p className="text-xs text-muted-foreground">
+                    See whether this workspace is fully local/free, partially local, or still missing LM Studio details.
+                  </p>
+                </div>
+
+                {localAiModeStatus?.mode === "fully_local" && (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                    <p className="font-medium">Fully Local/Free Mode</p>
+                    <p className="mt-1">Chat and embeddings are both configured for LM Studio.</p>
+                  </div>
+                )}
+
+                {localAiModeStatus?.mode === "partially_local" && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <p className="font-medium">Partially Local Mode</p>
+                    <p className="mt-1">{localAiModeStatus.warning}</p>
+                  </div>
+                )}
+
+                {localAiModeStatus?.mode === "incomplete_local" && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <p className="font-medium">LM Studio Local Mode Incomplete</p>
+                    <p className="mt-1">{localAiModeStatus.warning}</p>
+                  </div>
+                )}
+
+                <div className="space-y-1 border-t border-border/50 pt-4">
+                  <h3 className="text-sm font-medium">Local/LM Studio Validation</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Test LM Studio connectivity and verify that the configured chat and embedding models are actually available on the local server.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleValidateLmStudio}
+                    disabled={lmStudioValidationLoading || !hasLmStudioSelection}
+                  >
+                    {lmStudioValidationLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Test LM Studio Connection
+                  </Button>
+                  {!hasLmStudioSelection && (
+                    <p className="text-xs text-muted-foreground">
+                      Select LM Studio for chat or embeddings to run the local validation check.
+                    </p>
+                  )}
+                </div>
+
+                {lmStudioValidation?.connection.message && (
+                  <div
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-xs",
+                      lmStudioValidation.connection.status === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                        : "border-amber-200 bg-amber-50 text-amber-900",
+                    )}
+                  >
+                    <p>{lmStudioValidation.connection.message}</p>
+                    {lmStudioValidation.connection.modelIds.length > 0 && (
+                      <p className="mt-1">
+                        Models: {lmStudioValidation.connection.modelIds.join(", ")}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {(lmStudioValidation?.chatModel.message || lmStudioValidation?.embeddingModel.message) && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {lmStudioValidation?.chatModel.message && (
+                      <div
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-xs",
+                          lmStudioValidation.chatModel.status === "success"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                            : "border-amber-200 bg-amber-50 text-amber-900",
+                        )}
+                      >
+                        <p className="font-medium">Chat Model Validation</p>
+                        <p className="mt-1">{lmStudioValidation.chatModel.message}</p>
+                      </div>
+                    )}
+                    {lmStudioValidation?.embeddingModel.message && (
+                      <div
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-xs",
+                          lmStudioValidation.embeddingModel.status === "success"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                            : "border-amber-200 bg-amber-50 text-amber-900",
+                        )}
+                      >
+                        <p className="font-medium">Embedding Model Validation</p>
+                        <p className="mt-1">{lmStudioValidation.embeddingModel.message}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-1 border-t border-border/50 pt-4">
+                  <h3 className="text-sm font-medium">Retrieval / Index Status</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Track whether the selected embedding configuration matches the active retrieval generation and whether reindexing is pending.
+                  </p>
+                </div>
+
+                {embeddingReindexWarning && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <p>{embeddingReindexWarning}</p>
+                    <p className="mt-1">
+                      Status: {chatSettings.embeddings.reindexState.status}
+                    </p>
+                  </div>
+                )}
+
+                {showEmbeddingProgress && embeddingReindexState && (
+                  <div className="space-y-3 rounded-md border border-border/50 bg-muted/20 px-3 py-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-foreground">Embedding rebuild progress</p>
+                      <p className="text-xs text-muted-foreground">
+                        {embeddingReindexState.progressLabel}
+                      </p>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label="Embedding rebuild progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={embeddingProgressValue}
+                      className="h-2 overflow-hidden rounded-full bg-border/60"
+                    >
+                      <div
+                        className={cn(
+                          "h-full rounded-full transition-[width]",
+                          embeddingReindexState.progressStatus === "failed"
+                            ? "bg-destructive"
+                            : embeddingReindexState.progressStatus === "queued"
+                              ? "bg-amber-500"
+                              : "bg-emerald-600",
+                        )}
+                        style={{ width: `${embeddingProgressValue}%` }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>{embeddingReindexState.progressLabel}</span>
+                      <span>{embeddingProgressValue}%</span>
+                    </div>
+                    {embeddingProgressCountText && (
+                      <p className="text-xs text-muted-foreground">{embeddingProgressCountText}</p>
+                    )}
+                    {embeddingReindexState.lastError && (
+                      <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                        {embeddingReindexState.lastError}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeEmbeddingConfig && (
+                  <div className="grid gap-4 rounded-md border border-border/50 bg-muted/20 px-3 py-3 text-xs text-muted-foreground sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="font-medium text-foreground">Selected Embedding Config</p>
+                      <p>{chatSettings.embeddings.embeddingProvider} / {chatSettings.embeddings.embeddingModel}</p>
+                      <p>{chatSettings.embeddings.vectorDimensions}d schema {chatSettings.embeddings.schemaDimensions}d</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-medium text-foreground">Active Retrieval Config</p>
+                      <p>{activeEmbeddingConfig.embeddingProvider} / {activeEmbeddingConfig.embeddingModel}</p>
+                      <p>{activeEmbeddingConfig.vectorDimensions}d schema {activeEmbeddingConfig.schemaDimensions}d</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="space-y-2">
@@ -732,6 +1049,19 @@ export default function Settings() {
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2 text-sm">
+                    <span>AI enabled</span>
+                    <Switch
+                      checked={chatSettings.runtime.aiEnabled}
+                      onCheckedChange={(value) => setChatSettings((current) => current ? ({
+                        ...current,
+                        runtime: {
+                          ...current.runtime,
+                          aiEnabled: value,
+                        },
+                      }) : current)}
+                    />
+                  </label>
                   <label className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2 text-sm">
                     <span>Default similarity expansion</span>
                     <Switch

@@ -10,9 +10,16 @@ import {
 
 function createAdminClientMock() {
   const rpc = vi.fn();
-  const eq = vi.fn();
-  const update = vi.fn(() => ({ eq }));
-  const from = vi.fn(() => ({ update }));
+  const updateEq = vi.fn();
+  const update = vi.fn(() => ({ eq: updateEq }));
+  const upsert = vi.fn().mockResolvedValue({ error: null });
+  const from = vi.fn((table: string) => {
+    if (table === "search_document_embeddings") {
+      return { upsert };
+    }
+
+    return { update };
+  });
 
   return {
     client: {
@@ -22,7 +29,8 @@ function createAdminClientMock() {
     rpc,
     from,
     update,
-    eq,
+    eq: updateEq,
+    upsert,
   };
 }
 
@@ -32,6 +40,9 @@ function createEmbeddingProviderMock(overrides: Partial<SearchEmbeddingProvider>
       embeddings: texts.map(() => [0.1, 0.2, 0.3]),
       model: "test-model",
       providerConfigured: true,
+      providerUsed: "local",
+      configuredDimensions: 3,
+      storageDimensions: 3,
     })),
     toVectorString: vi.fn((embedding: number[]) => `[${embedding.join(",")}]`),
     ...overrides,
@@ -98,8 +109,8 @@ describe("search-index-maintenance", () => {
     });
   });
 
-  it("claims queued stale documents, writes embeddings, and completes the job", async () => {
-    const { client, rpc, from, update, eq } = createAdminClientMock();
+  it("claims queued stale documents, writes a pending embedding generation, and activates it only after the build completes", async () => {
+    const { client, rpc, from, upsert } = createAdminClientMock();
     const embeddingProvider = createEmbeddingProviderMock();
 
     rpc.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
@@ -116,6 +127,17 @@ describe("search-index-maintenance", () => {
 
       if (name === "list_stale_search_documents") {
         if (args?._limit === 1) {
+          const limitOneCalls = rpc.mock.calls.filter(([rpcName, rpcArgs]) => (
+            rpcName === "list_stale_search_documents" && rpcArgs?._limit === 1
+          )).length;
+
+          if (limitOneCalls > 1) {
+            return {
+              data: [],
+              error: null,
+            };
+          }
+
           return {
             data: [{ id: "doc-1", search_text: "API gateway identity" }],
             error: null,
@@ -139,14 +161,18 @@ describe("search-index-maintenance", () => {
         return { data: null, error: null };
       }
 
+      if (name === "activate_search_embedding_generation") {
+        return { data: null, error: null };
+      }
+
       throw new Error(`Unexpected rpc call: ${name}`);
     });
-
-    eq.mockResolvedValue({ error: null });
 
     const result = await embedStaleDocuments(client, embeddingProvider, {
       limit: 25,
       workerId: "worker-1",
+      targetGenerationId: "gen-selected",
+      targetEmbeddingFingerprint: "fp_selected",
     });
 
     expect(rpc).toHaveBeenCalledWith("enqueue_search_index_job", {
@@ -154,15 +180,18 @@ describe("search-index-maintenance", () => {
       _metadata: {
         reason: "embed_stale_documents_requested",
         limit: 25,
+        generationId: "gen-selected",
       },
     });
-    expect(from).toHaveBeenCalledWith("search_documents");
-    expect(update).toHaveBeenCalledTimes(2);
-    expect(eq).toHaveBeenCalledWith("id", "doc-2");
+    expect(from).toHaveBeenCalledWith("search_document_embeddings");
+    expect(upsert).toHaveBeenCalledTimes(2);
     expect(rpc).toHaveBeenCalledWith("complete_search_index_job", {
       _job_id: "job-embed-1",
       _status: "completed",
       _error: null,
+    });
+    expect(rpc).toHaveBeenCalledWith("activate_search_embedding_generation", {
+      _generation_id: "gen-selected",
     });
     expect(result).toMatchObject({
       claimed: true,
@@ -171,6 +200,169 @@ describe("search-index-maintenance", () => {
       synced: 2,
       providerConfigured: true,
       model: "test-model",
+      generationActivated: true,
+    });
+  });
+
+  it("does not activate the pending generation when more stale documents remain after a partial batch", async () => {
+    const { client, rpc } = createAdminClientMock();
+    const embeddingProvider = createEmbeddingProviderMock();
+
+    rpc.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+      if (name === "claim_search_index_job") {
+        return {
+          data: [{ id: "job-embed-3", job_type: "embed_stale_documents", metadata: {}, attempts: 1 }],
+          error: null,
+        };
+      }
+
+      if (name === "list_stale_search_documents") {
+        if (args?._limit === 1) {
+          const limitOneCalls = rpc.mock.calls.filter(([rpcName, rpcArgs]) => (
+            rpcName === "list_stale_search_documents" && rpcArgs?._limit === 1
+          )).length;
+
+          if (limitOneCalls > 1) {
+            return {
+              data: [{ id: "doc-remaining", search_text: "remaining search text" }],
+              error: null,
+            };
+          }
+
+          return {
+            data: [{ id: "doc-1", search_text: "API gateway identity" }],
+            error: null,
+          };
+        }
+
+        return {
+          data: [
+            { id: "doc-1", search_text: "API gateway identity" },
+          ],
+          error: null,
+        };
+      }
+
+      if (name === "complete_search_index_job") {
+        return { data: null, error: null };
+      }
+
+      throw new Error(`Unexpected rpc call: ${name}`);
+    });
+
+    const result = await embedStaleDocuments(client, embeddingProvider, {
+      workerId: "worker-3",
+      targetGenerationId: "gen-selected",
+      targetEmbeddingFingerprint: "fp_selected",
+    });
+
+    expect(rpc).not.toHaveBeenCalledWith("activate_search_embedding_generation", expect.anything());
+    expect(result).toMatchObject({
+      claimed: true,
+      synced: 1,
+      generationActivated: false,
+      remainingStaleDocuments: 1,
+    });
+  });
+
+  it("activates the pending generation when a claimed job finds no remaining stale documents", async () => {
+    const { client, rpc } = createAdminClientMock();
+    const embeddingProvider = createEmbeddingProviderMock();
+
+    rpc.mockImplementation(async (name: string) => {
+      if (name === "claim_search_index_job") {
+        return {
+          data: [{ id: "job-embed-4", job_type: "embed_stale_documents", metadata: {}, attempts: 1 }],
+          error: null,
+        };
+      }
+
+      if (name === "list_stale_search_documents") {
+        return {
+          data: [],
+          error: null,
+        };
+      }
+
+      if (name === "complete_search_index_job" || name === "activate_search_embedding_generation") {
+        return { data: null, error: null };
+      }
+
+      throw new Error(`Unexpected rpc call: ${name}`);
+    });
+
+    const result = await embedStaleDocuments(client, embeddingProvider, {
+      workerId: "worker-4",
+      targetGenerationId: "gen-selected",
+      targetEmbeddingFingerprint: "fp_selected",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("activate_search_embedding_generation", {
+      _generation_id: "gen-selected",
+    });
+    expect(result).toMatchObject({
+      claimed: true,
+      synced: 0,
+      generationActivated: true,
+    });
+  });
+
+  it("does not report generation activation when the backend skips an outdated generation switch", async () => {
+    const { client, rpc } = createAdminClientMock();
+    const embeddingProvider = createEmbeddingProviderMock();
+
+    rpc.mockImplementation(async (name: string, args?: Record<string, unknown>) => {
+      if (name === "claim_search_index_job") {
+        return {
+          data: [{ id: "job-embed-5", job_type: "embed_stale_documents", metadata: {}, attempts: 1 }],
+          error: null,
+        };
+      }
+
+      if (name === "list_stale_search_documents") {
+        if (args?._limit === 1) {
+          return {
+            data: [],
+            error: null,
+          };
+        }
+
+        return {
+          data: [{ id: "doc-1", search_text: "API gateway identity" }],
+          error: null,
+        };
+      }
+
+      if (name === "complete_search_index_job") {
+        return { data: null, error: null };
+      }
+
+      if (name === "activate_search_embedding_generation") {
+        return {
+          data: {
+            activated: false,
+            reason: "generation_no_longer_selected",
+          },
+          error: null,
+        };
+      }
+
+      throw new Error(`Unexpected rpc call: ${name}`);
+    });
+
+    const result = await embedStaleDocuments(client, embeddingProvider, {
+      workerId: "worker-5",
+      targetGenerationId: "gen-stale",
+      targetEmbeddingFingerprint: "fp_stale",
+    });
+
+    expect(rpc).toHaveBeenCalledWith("activate_search_embedding_generation", {
+      _generation_id: "gen-stale",
+    });
+    expect(result).toMatchObject({
+      claimed: true,
+      synced: 1,
+      generationActivated: false,
     });
   });
 
@@ -181,6 +373,9 @@ describe("search-index-maintenance", () => {
         embeddings: [],
         model: null,
         providerConfigured: false,
+        providerUsed: null,
+        configuredDimensions: 3,
+        storageDimensions: 3,
       })),
     });
 

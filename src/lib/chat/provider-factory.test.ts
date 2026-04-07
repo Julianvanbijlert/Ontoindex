@@ -74,6 +74,34 @@ describe("createLlmProvider", () => {
     expect(provider.info.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
   });
 
+  it("resolves LM Studio runtime defaults without falling back to paid providers", () => {
+    expect(resolveLlmProviderRuntimeConfig({
+      LLM_PROVIDER: "lmstudio",
+    })).toMatchObject({
+      provider: "lmstudio",
+      model: "",
+      baseUrl: "http://localhost:1234/v1",
+      apiKey: null,
+      temperature: 0.2,
+      maxTokens: 700,
+    });
+  });
+
+  it("supports LM Studio as a selectable chat provider without requiring an API key", () => {
+    const provider = createLlmProvider({
+      provider: "lmstudio",
+      model: "local-chat-model",
+      baseUrl: "http://localhost:1234/v1",
+      apiKey: null,
+      temperature: 0.2,
+      maxTokens: 200,
+    });
+
+    expect(provider.info.name).toBe("lmstudio");
+    expect(provider.info.family).toBe("openai-compatible");
+    expect(provider.info.baseUrl).toBe("http://localhost:1234/v1");
+  });
+
   it("creates the optional DeepSeek reasoner model with the right capabilities", () => {
     const provider = createLlmProvider({
       provider: "deepseek",

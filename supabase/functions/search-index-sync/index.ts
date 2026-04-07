@@ -1,7 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import { requireDatabaseAdminAccess } from "../_shared/admin-access.ts";
 import { loadAiRuntimeRows } from "../_shared/ai-admin-settings.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { readSearchEmbeddingConfig } from "../_shared/search-ai-config.ts";
 import { embedTexts, toVectorString } from "../_shared/search-embeddings.ts";
 import {
   embedStaleDocuments,
@@ -75,22 +77,59 @@ async function requireAuthorizedOperator(request: Request) {
   }
 
   const userClient = createUserClient(request);
-  const {
-    data: { user },
-    error: userError,
-  } = await userClient.auth.getUser();
-
-  if (userError || !user) {
-    throw new Error("Unauthorized");
-  }
-
   const adminClient = createAdminClient();
-  const { data: isAdmin, error: roleError } = await adminClient.rpc<boolean>("has_role", {
-    _user_id: user.id,
-    _role: "admin",
+  const decision = await requireDatabaseAdminAccess({
+    getUser: async () => {
+      const {
+        data: { user },
+        error: userError,
+      } = await userClient.auth.getUser();
+
+      if (userError || !user) {
+        return null;
+      }
+
+      return {
+        id: user.id,
+        email: user.email ?? null,
+        requestedRole: typeof user.user_metadata?.requested_role === "string"
+          ? user.user_metadata.requested_role
+          : null,
+      };
+    },
+    loadProfile: async (userId) => {
+      const { data, error } = await adminClient
+        .from("profiles")
+        .select("user_id, email")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error || !data) {
+        return null;
+      }
+
+      return {
+        userId: data.user_id,
+        email: typeof data.email === "string" ? data.email : null,
+      };
+    },
+    loadRoles: async (userId) => {
+      const { data, error } = await adminClient
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", userId);
+
+      if (error || !data) {
+        return [];
+      }
+
+      return data
+        .map((row) => (typeof row.role === "string" ? row.role : null))
+        .filter((role): role is string => Boolean(role));
+    },
   });
 
-  if (roleError || !isAdmin) {
+  if (!decision.isAdmin) {
     throw new Error("Unauthorized");
   }
 }
@@ -127,8 +166,9 @@ Deno.serve(async (request) => {
 
     const adminClient = createAdminClient();
     const aiRuntimeRows = await loadAiRuntimeRows(adminClient);
+    const embeddingConfig = readSearchEmbeddingConfig(aiRuntimeRows);
     const embeddingProvider: SearchEmbeddingProvider = {
-      embedDocuments: (texts) => embedTexts(texts, aiRuntimeRows),
+      embedDocuments: (texts) => embedTexts(texts, aiRuntimeRows, "selected"),
       toVectorString,
     };
     let payload: Record<string, unknown>;
@@ -165,12 +205,18 @@ Deno.serve(async (request) => {
       const result = await embedStaleDocuments(adminClient, embeddingProvider, {
         limit: (body as EmbedStaleDocumentsRequest).limit,
         workerId: (body as EmbedStaleDocumentsRequest).workerId,
+        targetGenerationId: embeddingConfig.targetGenerationId,
+        targetEmbeddingFingerprint: embeddingConfig.selectedFingerprint,
       });
       console.info("search_index_embedding_backfill_result", {
         action,
         providerConfigured: result.providerConfigured ?? null,
         providerUsed: result.providerUsed ?? null,
         model: result.model ?? null,
+        configuredDimensions: result.configuredDimensions ?? null,
+        storageDimensions: result.storageDimensions ?? null,
+        generationActivated: result.generationActivated ?? null,
+        remainingStaleDocuments: result.remainingStaleDocuments ?? null,
         documentCount: result.documentCount ?? 0,
         synced: result.synced ?? 0,
       });

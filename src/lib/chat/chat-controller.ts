@@ -20,7 +20,7 @@ function toSearchFilters(settings: ChatSessionSettings): SearchFilters {
   return {
     ontologyId: settings.ontologyScopeId || "all",
     tag: "all",
-    status: "all",
+    status: "approved",
     type: "all",
     ownership: "all",
   };

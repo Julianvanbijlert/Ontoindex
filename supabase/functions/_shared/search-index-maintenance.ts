@@ -22,15 +22,29 @@ export interface SearchIndexMaintenanceUpdateResult {
   error: Error | { message?: string } | null;
 }
 
-export interface SearchDocumentsTableClient {
-  update(values: Record<string, unknown>): {
-    eq(column: string, value: string): Promise<SearchIndexMaintenanceUpdateResult>;
-  };
+interface SearchEmbeddingGenerationActivationResult {
+  activated?: boolean | null;
+}
+
+function wasGenerationActivated(result: SearchIndexMaintenanceRpcResponse<unknown>) {
+  if (!result.data || typeof result.data !== "object" || Array.isArray(result.data)) {
+    return true;
+  }
+
+  const activation = result.data as SearchEmbeddingGenerationActivationResult;
+  return activation.activated !== false;
+}
+
+export interface SearchDocumentEmbeddingsTableClient {
+  upsert(
+    values: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ): Promise<SearchIndexMaintenanceUpdateResult>;
 }
 
 export interface SearchIndexMaintenanceAdminClient {
   rpc<T = unknown>(name: string, args?: Record<string, unknown>): Promise<SearchIndexMaintenanceRpcResponse<T>>;
-  from(table: "search_documents"): SearchDocumentsTableClient;
+  from(table: "search_document_embeddings"): SearchDocumentEmbeddingsTableClient;
 }
 
 export interface SearchEmbeddingProviderResult {
@@ -39,6 +53,13 @@ export interface SearchEmbeddingProviderResult {
   providerConfigured: boolean;
   providerUsed?: string | null;
   configurationError?: string | null;
+  configuredDimensions: number;
+  storageDimensions: number;
+  dimensionCompatibility?: {
+    status: "match" | "padded" | "truncated";
+    mismatch: boolean;
+    message: string | null;
+  };
 }
 
 export interface SearchEmbeddingProvider {
@@ -74,6 +95,7 @@ export async function ensureEmbedJob(
   adminClient: SearchIndexMaintenanceAdminClient,
   workerId: string,
   limit: number,
+  generationId?: string | null,
 ) {
   let claimedJob = await claimEmbedJob(adminClient, workerId);
 
@@ -83,7 +105,7 @@ export async function ensureEmbedJob(
 
   const { data: staleDocuments, error: staleError } = await adminClient.rpc<SearchDocumentRecord[]>(
     "list_stale_search_documents",
-    { _limit: 1 },
+    { _limit: 1, _generation_id: generationId || null },
   );
 
   if (staleError) {
@@ -99,6 +121,7 @@ export async function ensureEmbedJob(
     _metadata: {
       reason: "embed_stale_documents_requested",
       limit,
+      generationId: generationId || null,
     },
   });
 
@@ -113,9 +136,11 @@ export async function ensureEmbedJob(
 export async function fetchStaleDocuments(
   adminClient: SearchIndexMaintenanceAdminClient,
   limit: number,
+  generationId?: string | null,
 ) {
   const { data, error } = await adminClient.rpc<SearchDocumentRecord[]>("list_stale_search_documents", {
     _limit: limit,
+    _generation_id: generationId || null,
   });
 
   if (error) {
@@ -129,8 +154,18 @@ export async function updateEmbeddingBatch(
   adminClient: SearchIndexMaintenanceAdminClient,
   embeddingProvider: SearchEmbeddingProvider,
   documents: SearchDocumentRecord[],
+  generationId?: string | null,
+  embeddingConfigFingerprint?: string | null,
 ) {
-  const { embeddings, model, providerConfigured, providerUsed, configurationError } = await embeddingProvider.embedDocuments(
+  const {
+    embeddings,
+    model,
+    providerConfigured,
+    providerUsed,
+    configurationError,
+    configuredDimensions,
+    storageDimensions,
+  } = await embeddingProvider.embedDocuments(
     documents.map((document) => document.search_text),
   );
 
@@ -153,13 +188,19 @@ export async function updateEmbeddingBatch(
   await Promise.all(
     documents.map(async (document, index) => {
       const { error } = await adminClient
-        .from("search_documents")
-        .update({
+        .from("search_document_embeddings")
+        .upsert({
+          search_document_id: document.id,
+          generation_id: generationId || null,
+          generation_fingerprint: embeddingConfigFingerprint || null,
           embedding: embeddings[index] ? embeddingProvider.toVectorString(embeddings[index]) : null,
           embedding_model: model,
+          embedding_provider: providerUsed || null,
+          embedding_dimensions: storageDimensions,
           embedding_updated_at: new Date().toISOString(),
-        })
-        .eq("id", document.id);
+        }, {
+          onConflict: "search_document_id,generation_id",
+        });
 
       if (error) {
         throw error;
@@ -170,6 +211,8 @@ export async function updateEmbeddingBatch(
   console.info("embedding_batch_updated", {
     providerUsed: providerUsed || null,
     model,
+    configuredDimensions,
+    storageDimensions,
     documentCount: documents.length,
     updatedRowCount: documents.length,
   });
@@ -179,6 +222,8 @@ export async function updateEmbeddingBatch(
     providerConfigured,
     providerUsed: providerUsed || null,
     configurationError: null,
+    configuredDimensions,
+    storageDimensions,
     synced: documents.length,
   };
 }
@@ -219,12 +264,16 @@ export async function embedStaleDocuments(
   input?: {
     limit?: number;
     workerId?: string;
+    targetGenerationId?: string | null;
+    targetEmbeddingFingerprint?: string | null;
   },
 ) {
   const limit = normalizeBatchSize(input?.limit);
   const workerId = input?.workerId?.trim() || "search-index-worker";
+  const targetGenerationId = input?.targetGenerationId?.trim() || null;
+  const targetEmbeddingFingerprint = input?.targetEmbeddingFingerprint?.trim() || null;
   const startedAt = Date.now();
-  const claimedJob = await ensureEmbedJob(adminClient, workerId, limit);
+  const claimedJob = await ensureEmbedJob(adminClient, workerId, limit, targetGenerationId);
 
   if (!claimedJob) {
     return {
@@ -236,7 +285,7 @@ export async function embedStaleDocuments(
   }
 
   try {
-    const documents = await fetchStaleDocuments(adminClient, limit);
+    const documents = await fetchStaleDocuments(adminClient, limit, targetGenerationId);
 
     if (documents.length === 0) {
       await adminClient.rpc("complete_search_index_job", {
@@ -245,11 +294,31 @@ export async function embedStaleDocuments(
         _error: null,
       });
 
+      if (targetGenerationId) {
+        const activationResult = await adminClient.rpc("activate_search_embedding_generation", {
+          _generation_id: targetGenerationId,
+        });
+
+        if (activationResult.error) {
+          throw activationResult.error;
+        }
+
+        return {
+          claimed: true,
+          jobId: claimedJob.id,
+          documentCount: 0,
+          synced: 0,
+          generationActivated: wasGenerationActivated(activationResult),
+          tookMs: Date.now() - startedAt,
+        };
+      }
+
       return {
         claimed: true,
         jobId: claimedJob.id,
         documentCount: 0,
         synced: 0,
+        generationActivated: Boolean(targetGenerationId),
         tookMs: Date.now() - startedAt,
       };
     }
@@ -259,14 +328,26 @@ export async function embedStaleDocuments(
     let providerConfigured = false;
     let providerUsed: string | null = null;
     let configurationError: string | null = null;
+    let configuredDimensions: number | null = null;
+    let storageDimensions: number | null = null;
+    let generationActivated = false;
+    let remainingStaleDocuments = 0;
 
     for (let index = 0; index < documents.length; index += EMBEDDING_BATCH_SIZE) {
       const batch = documents.slice(index, index + EMBEDDING_BATCH_SIZE);
-      const result = await updateEmbeddingBatch(adminClient, embeddingProvider, batch);
+      const result = await updateEmbeddingBatch(
+        adminClient,
+        embeddingProvider,
+        batch,
+        targetGenerationId,
+        targetEmbeddingFingerprint,
+      );
       model = result.model;
       providerConfigured = result.providerConfigured;
       providerUsed = result.providerUsed || providerUsed;
       configurationError = result.configurationError || configurationError;
+      configuredDimensions = result.configuredDimensions ?? configuredDimensions;
+      storageDimensions = result.storageDimensions ?? storageDimensions;
       synced += result.synced;
 
       if (!providerConfigured) {
@@ -280,6 +361,23 @@ export async function embedStaleDocuments(
       _error: providerConfigured ? null : (configurationError || "Embedding provider not configured"),
     });
 
+    if (providerConfigured && targetGenerationId) {
+      const remaining = await fetchStaleDocuments(adminClient, 1, targetGenerationId);
+      remainingStaleDocuments = remaining.length;
+
+      if (remaining.length === 0) {
+        const activationResult = await adminClient.rpc("activate_search_embedding_generation", {
+          _generation_id: targetGenerationId,
+        });
+
+        if (activationResult.error) {
+          throw activationResult.error;
+        }
+
+        generationActivated = wasGenerationActivated(activationResult);
+      }
+    }
+
     return {
       claimed: true,
       jobId: claimedJob.id,
@@ -287,7 +385,11 @@ export async function embedStaleDocuments(
       model,
       providerConfigured,
       providerUsed,
+      configuredDimensions,
+      storageDimensions,
       configurationError,
+      remainingStaleDocuments,
+      generationActivated,
       synced,
       tookMs: Date.now() - startedAt,
     };

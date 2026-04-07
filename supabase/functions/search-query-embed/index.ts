@@ -2,7 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 import { loadAiRuntimeRows } from "../_shared/ai-admin-settings.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { embedTexts, toVectorString } from "../_shared/search-embeddings.ts";
+import { readSearchEmbeddingConfig } from "../_shared/search-ai-config.ts";
+import { createEmbeddingProviderClient, toVectorString } from "../_shared/search-embeddings.ts";
 import {
   buildContextSummary,
   buildEmbeddingInput,
@@ -62,6 +63,7 @@ Deno.serve(async (request) => {
     const user = await requireUser(request);
     const adminClient = createAdminClient();
     const aiRuntimeRows = await loadAiRuntimeRows(adminClient);
+    const embeddingConfig = readSearchEmbeddingConfig(aiRuntimeRows);
 
     const body = await request.json();
     const query = typeof body?.query === "string" ? body.query.trim() : "";
@@ -115,6 +117,12 @@ Deno.serve(async (request) => {
             cacheHit: true,
             cacheKey,
             contextHash: contextHash || null,
+            reindexRequired: embeddingConfig.reindexRequired,
+            embeddingConfigFingerprint: embeddingConfig.activeFingerprint,
+            indexedConfigFingerprint: embeddingConfig.lastIndexedFingerprint,
+            selectedEmbeddingConfigFingerprint: embeddingConfig.selectedFingerprint,
+            activeEmbeddingGenerationId: embeddingConfig.activeGenerationId,
+            selectedEmbeddingGenerationId: embeddingConfig.targetGenerationId,
           },
         }), {
           headers: {
@@ -143,18 +151,20 @@ Deno.serve(async (request) => {
       mode: requestedMode,
       contextSummary: contextSummaryState.summary,
     });
-    const { embeddings, model, providerConfigured, providerUsed, configurationError } = await embedTexts(
-      [embeddingInputState.embeddingInput],
-      aiRuntimeRows,
-    );
-    const embedding = providerConfigured && embeddings[0] ? toVectorString(embeddings[0]) : null;
+    const embeddingProvider = createEmbeddingProviderClient(aiRuntimeRows, "active");
+    const embeddingResult = await embeddingProvider.embedQuery(embeddingInputState.embeddingInput);
+    const embedding = embeddingResult.providerConfigured && embeddingResult.embedding.length > 0
+      ? toVectorString(embeddingResult.embedding)
+      : null;
     console.info("search_query_embedding_result", {
-      providerUsed: providerUsed || null,
-      model: model || null,
-      providerConfigured,
-      parsedEmbeddingCount: embeddings.length,
-      firstEmbeddingVectorLength: embeddings[0]?.length || 0,
-      configurationError: configurationError || null,
+      providerUsed: embeddingResult.providerUsed || embeddingResult.info.provider || null,
+      model: embeddingResult.info.model || null,
+      providerConfigured: embeddingResult.providerConfigured,
+      parsedEmbeddingCount: embeddingResult.embedding.length ? 1 : 0,
+      firstEmbeddingVectorLength: embeddingResult.embedding.length,
+      configurationError: embeddingResult.configurationError || null,
+      configuredDimensions: embeddingResult.info.dimensions,
+      storageDimensions: embeddingResult.info.storageDimensions || null,
     });
     const debug = {
       cacheHit: false,
@@ -166,6 +176,16 @@ Deno.serve(async (request) => {
       requestedMode: embeddingInputState.requestedMode,
       sessionModeFallback: embeddingInputState.sessionModeFallback,
       summaryDebug: contextSummaryState.debug,
+      embeddingProvider: embeddingResult.providerUsed || embeddingResult.info.provider || null,
+      embeddingModel: embeddingResult.info.model || null,
+      embeddingDimensions: embeddingResult.info.dimensions,
+      embeddingStorageDimensions: embeddingResult.info.storageDimensions || null,
+      reindexRequired: embeddingConfig.reindexRequired,
+      embeddingConfigFingerprint: embeddingConfig.activeFingerprint,
+      indexedConfigFingerprint: embeddingConfig.lastIndexedFingerprint,
+      selectedEmbeddingConfigFingerprint: embeddingConfig.selectedFingerprint,
+      activeEmbeddingGenerationId: embeddingConfig.activeGenerationId,
+      selectedEmbeddingGenerationId: embeddingConfig.targetGenerationId,
     };
 
     if (adminClient && embedding) {
@@ -180,7 +200,9 @@ Deno.serve(async (request) => {
           context_mode: requestedMode,
           context_summary: embeddingInputState.contextSummary,
           embedding,
-          model,
+          model: embeddingResult.info.model,
+          embedding_provider: embeddingResult.providerUsed || embeddingResult.info.provider || null,
+          embedding_dimensions: embeddingResult.info.storageDimensions || embeddingResult.info.dimensions,
           debug_metadata: debug,
           expires_at: new Date(Date.now() + (1000 * 60 * 60 * 24)).toISOString(),
           updated_at: new Date().toISOString(),
@@ -192,9 +214,12 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({
       embedding,
       latencyMs: Date.now() - startedAt,
-      model,
-      providerConfigured,
-      providerError: configurationError || null,
+      model: embeddingResult.info.model,
+      provider: embeddingResult.providerUsed || embeddingResult.info.provider || null,
+      dimensions: embeddingResult.info.dimensions,
+      storageDimensions: embeddingResult.info.storageDimensions || null,
+      providerConfigured: embeddingResult.providerConfigured,
+      providerError: embeddingResult.configurationError || null,
       debug,
     }), {
       headers: {

@@ -1,3 +1,6 @@
+import type { EmbeddingDimensionCompatibility } from "../ai/embedding-dimensions.ts";
+import type { EmbeddingReindexState } from "../ai/embedding-config-state.ts";
+
 export type JsonValue =
   | string
   | number
@@ -64,6 +67,7 @@ export interface ChatSessionSettings {
 }
 
 export interface ChatRuntimeSettings {
+  aiEnabled: boolean;
   enableSimilarityExpansion: boolean;
   strictCitationsDefault: boolean;
   historyMessageLimit: number;
@@ -91,6 +95,19 @@ export interface AdminEmbeddingProviderSettings {
   fallbackModel: string | null;
   fallbackBaseUrl: string | null;
   vectorDimensions: number;
+  schemaDimensions: number;
+  dimensionCompatibility: EmbeddingDimensionCompatibility;
+  activeRetrieval: {
+    embeddingProvider: string;
+    embeddingModel: string;
+    embeddingBaseUrl: string | null;
+    vectorDimensions: number;
+    schemaDimensions: number;
+    generationId: string | null;
+    fingerprint: string;
+    activatedAt: string | null;
+  };
+  reindexState: EmbeddingReindexState;
 }
 
 export interface AdminAiProviderSecrets {
@@ -116,6 +133,7 @@ export interface AdminChatSettings {
   embeddings: AdminEmbeddingProviderSettings;
   providerKeys: AdminAiProviderSecrets;
   runtime: {
+    aiEnabled: boolean;
     enableSimilarityExpansion: boolean;
     strictCitationsDefault: boolean;
     historyLimit: number;
@@ -141,8 +159,10 @@ export interface AdminChatSettingsUpdateInput {
     fallbackModel: string | null;
     fallbackBaseUrl: string | null;
     vectorDimensions: number;
+    schemaDimensions: number;
   };
   runtime: {
+    aiEnabled: boolean;
     enableSimilarityExpansion: boolean;
     strictCitationsDefault: boolean;
     historyLimit: number;
@@ -260,6 +280,21 @@ export interface LlmProvider {
   readonly info: LlmProviderInfo;
   readonly capabilities: LlmProviderCapabilities;
   generate(input: LlmGenerationInput): Promise<LlmGenerationResult>;
+}
+
+export interface ChatModelInfo {
+  provider: string;
+  model: string;
+  family?: string;
+  baseUrl?: string | null;
+}
+
+export type ChatCompletionInput = LlmGenerationInput;
+export type ChatCompletionResult = LlmGenerationResult;
+
+export interface ChatModelProvider {
+  readonly info: ChatModelInfo;
+  complete(input: ChatCompletionInput): Promise<ChatCompletionResult>;
 }
 
 export interface ChatBackendRequest {

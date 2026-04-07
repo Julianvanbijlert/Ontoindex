@@ -86,6 +86,7 @@ export default function ChatPage() {
   const [ontologies, setOntologies] = useState<Array<{ id: string; title: string }>>([]);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryEntry[]>([]);
   const [recentFinds, setRecentFinds] = useState<SearchResultItem[]>([]);
+  const aiEnabled = runtimeSettings?.aiEnabled ?? true;
 
   useEffect(() => {
     if (!user) {
@@ -199,6 +200,11 @@ export default function ChatPage() {
   };
 
   const handleSend = async () => {
+    if (!aiEnabled) {
+      setError("AI features are currently disabled by an administrator.");
+      return;
+    }
+
     if (!user || !input.trim()) {
       return;
     }
@@ -225,7 +231,7 @@ export default function ChatPage() {
           filters: {
             ontologyId: scopedSettings.ontologyScopeId || "all",
             tag: "all",
-            status: "all",
+            status: "approved",
             type: "all",
             ownership: "all",
           },
@@ -459,6 +465,7 @@ export default function ChatPage() {
               onChange={(event) => setInput(event.target.value)}
               placeholder="Ask about ontology concepts, definitions, relations, workflows, or recent changes..."
               className="min-h-[120px]"
+              disabled={!aiEnabled}
             />
             {activeSession?.title && (
               <p className="text-xs text-muted-foreground">
@@ -468,11 +475,16 @@ export default function ChatPage() {
             {error && (
               <p className="text-sm text-destructive">{error}</p>
             )}
+            {!aiEnabled && !error && (
+              <p className="text-sm text-muted-foreground">
+                AI features are disabled by an administrator.
+              </p>
+            )}
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 Grounded answers cite retrieved evidence and hedge when support is weak.
               </p>
-              <Button onClick={handleSend} disabled={sending || !input.trim()}>
+              <Button onClick={handleSend} disabled={sending || !input.trim() || !aiEnabled}>
                 {sending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Send
               </Button>

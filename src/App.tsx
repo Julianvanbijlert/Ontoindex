@@ -24,7 +24,15 @@ import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import AdminUsers from "./pages/AdminUsers";
 import NotFound from "./pages/NotFound";
+import { supabase } from "@/integrations/supabase/client";
 
+async function debugSession() {
+  const { data } = await supabase.auth.getSession();
+  console.log("SESSION:", data.session);
+  console.log("USER:", data.session?.user);
+}
+
+debugSession();
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -61,5 +69,7 @@ const App = () => (
     </TooltipProvider>
   </QueryClientProvider>
 );
+
+
 
 export default App;

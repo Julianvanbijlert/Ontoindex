@@ -1,26 +1,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-import {
-  defaultChatBaseUrlForProvider,
-  defaultChatModelForProvider,
-} from "../../../src/lib/ai/provider-factory.ts";
-import { createLlmProvider } from "../../../src/lib/chat/provider-factory.ts";
+import { createChatModelProvider } from "../../../src/lib/chat/provider-factory.ts";
 import { buildClarificationPrompt, buildGroundedAnswerPrompt } from "../../../src/lib/chat/prompt-builders.ts";
 import { validateGroundedAnswer } from "../../../src/lib/chat/citation-validator.ts";
-import {
-  resolveLlmProviderRuntimeConfig,
-  type LlmProviderRuntimeConfig,
-} from "../../../src/lib/chat/provider-config.ts";
+import type { LlmProviderRuntimeConfig } from "../../../src/lib/chat/provider-config.ts";
 import type {
   ChatBackendRequest,
   ChatBackendResponse,
   ChatCitation,
   ChatHistoryMessage,
+  ChatCompletionInput,
   ChatPromptBuildInput,
   ChatResponseMode,
   GroundedAnswerPayload,
 } from "../../../src/lib/chat/types.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { loadChatRuntimeSettings } from "../_shared/chat-runtime-settings.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
@@ -150,169 +145,6 @@ function createJsonResponse(requestId: string, status: number, payload: unknown)
   });
 }
 
-async function loadChatRuntimeSettings(
-  adminClient: ReturnType<typeof createAdminClient>,
-  env: Record<string, string | undefined>,
-) {
-  const envConfig = resolveLlmProviderRuntimeConfig(env);
-  const resolveProviderCredential = (
-    provider: string,
-    secrets?: {
-      chat_llm_api_key?: string | null;
-      deepseek_api_key?: string | null;
-      gemini_api_key?: string | null;
-    } | null,
-  ) => {
-    switch (provider) {
-      case "deepseek":
-        if (secrets?.chat_llm_api_key) {
-          return { apiKey: secrets.chat_llm_api_key, apiKeySource: "app_setting_secrets.chat_llm_api_key" };
-        }
-        if (secrets?.deepseek_api_key) {
-          return { apiKey: secrets.deepseek_api_key, apiKeySource: "app_setting_secrets.deepseek_api_key" };
-        }
-        if (env.DEEPSEEK_API_KEY) {
-          return { apiKey: env.DEEPSEEK_API_KEY, apiKeySource: "DEEPSEEK_API_KEY" };
-        }
-        if (env.LLM_API_KEY) {
-          return { apiKey: env.LLM_API_KEY, apiKeySource: "LLM_API_KEY" };
-        }
-        return { apiKey: null, apiKeySource: null };
-      case "gemini":
-        if (secrets?.gemini_api_key) {
-          return { apiKey: secrets.gemini_api_key, apiKeySource: "app_setting_secrets.gemini_api_key" };
-        }
-        if (env.GEMINI_API_KEY) {
-          return { apiKey: env.GEMINI_API_KEY, apiKeySource: "GEMINI_API_KEY" };
-        }
-        if (env.GOOGLE_API_KEY) {
-          return { apiKey: env.GOOGLE_API_KEY, apiKeySource: "GOOGLE_API_KEY" };
-        }
-        return { apiKey: null, apiKeySource: null };
-      default:
-        return { apiKey: envConfig.apiKey, apiKeySource: envConfig.apiKeySource || null };
-    }
-  };
-  const buildFallbackProviders = (
-    primaryProvider: string,
-    secrets?: {
-      deepseek_api_key?: string | null;
-      gemini_api_key?: string | null;
-    } | null,
-  ): LlmProviderRuntimeConfig[] => {
-    const fallbackProviders: LlmProviderRuntimeConfig[] = [];
-
-    if (primaryProvider !== "gemini") {
-      const geminiCredential = resolveProviderCredential("gemini", secrets);
-
-      if (geminiCredential.apiKey) {
-        fallbackProviders.push({
-          provider: "gemini",
-          model: env.LLM_GEMINI_FALLBACK_MODEL || defaultChatModelForProvider("gemini"),
-          baseUrl: defaultChatBaseUrlForProvider("gemini"),
-          apiKey: geminiCredential.apiKey,
-          apiKeySource: geminiCredential.apiKeySource,
-          temperature: envConfig.temperature,
-          maxTokens: envConfig.maxTokens,
-        });
-      }
-    }
-
-    if (primaryProvider !== "deepseek") {
-      const deepseekCredential = resolveProviderCredential("deepseek", secrets);
-
-      if (deepseekCredential.apiKey) {
-        fallbackProviders.push({
-          provider: "deepseek",
-          model: env.LLM_DEEPSEEK_FALLBACK_MODEL || defaultChatModelForProvider("deepseek"),
-          baseUrl: defaultChatBaseUrlForProvider("deepseek"),
-          apiKey: deepseekCredential.apiKey,
-          apiKeySource: deepseekCredential.apiKeySource,
-          temperature: envConfig.temperature,
-          maxTokens: envConfig.maxTokens,
-        });
-      }
-    }
-
-    return fallbackProviders;
-  };
-
-  if (!adminClient) {
-    return {
-      provider: envConfig,
-      fallbackProviders: buildFallbackProviders(envConfig.provider),
-      runtime: {
-        historyLimit: 12,
-        maxEvidenceItems: 6,
-        answerTemperature: envConfig.temperature,
-        maxAnswerTokens: envConfig.maxTokens,
-      },
-    };
-  }
-
-  const [settingsResponse, secretsResponse] = await Promise.all([
-    adminClient
-      .from("app_settings")
-      .select([
-        "chat_llm_provider",
-        "chat_llm_model",
-        "chat_llm_base_url",
-        "chat_llm_temperature",
-        "chat_llm_max_tokens",
-        "chat_history_limit",
-        "chat_max_evidence_items",
-        "chat_runtime_temperature",
-        "chat_runtime_max_tokens",
-      ].join(","))
-      .eq("id", 1)
-      .maybeSingle(),
-    adminClient
-      .from("app_setting_secrets")
-      .select("chat_llm_api_key, deepseek_api_key, gemini_api_key")
-      .eq("id", 1)
-      .maybeSingle(),
-  ]);
-
-  if (settingsResponse.error) {
-    console.warn("Chat runtime settings unavailable, falling back to env config.", {
-      message: settingsResponse.error.message,
-    });
-  }
-
-  if (secretsResponse.error) {
-    console.warn("Chat provider secrets unavailable, falling back to env config.", {
-      message: secretsResponse.error.message,
-    });
-  }
-
-  const settings = settingsResponse.data;
-  const secrets = secretsResponse.data as {
-    chat_llm_api_key?: string | null;
-    deepseek_api_key?: string | null;
-    gemini_api_key?: string | null;
-  } | null;
-  const providerName = settings?.chat_llm_provider || envConfig.provider;
-  const providerCredential = resolveProviderCredential(providerName, secrets);
-
-  return {
-    provider: {
-      provider: providerName,
-      model: settings?.chat_llm_model || envConfig.model,
-      baseUrl: settings?.chat_llm_base_url || envConfig.baseUrl,
-      apiKey: providerCredential.apiKey,
-      apiKeySource: providerCredential.apiKeySource,
-      temperature: Math.max(settings?.chat_llm_temperature ?? envConfig.temperature, 0),
-      maxTokens: Math.max(settings?.chat_llm_max_tokens ?? envConfig.maxTokens, 1),
-    },
-    fallbackProviders: buildFallbackProviders(providerName, secrets),
-    runtime: {
-      historyLimit: Math.max(settings?.chat_history_limit ?? 12, 1),
-      maxEvidenceItems: Math.max(settings?.chat_max_evidence_items ?? 6, 1),
-      answerTemperature: Math.max(settings?.chat_runtime_temperature ?? settings?.chat_llm_temperature ?? envConfig.temperature, 0),
-      maxAnswerTokens: Math.max(settings?.chat_runtime_max_tokens ?? settings?.chat_llm_max_tokens ?? envConfig.maxTokens, 1),
-    },
-  };
-}
 
 function summarizeRequestBody(body: ChatBackendRequest | null | undefined) {
   if (!body || typeof body !== "object") {
@@ -362,17 +194,35 @@ function validateChatBackendRequest(body: unknown): ChatBackendRequest {
 }
 
 function ensureProviderChain(configs: LlmProviderRuntimeConfig[]) {
-  if (configs.length === 0 || !configs.some((config) => Boolean(config.apiKey))) {
+  const runnableConfigs = configs.filter((config) => {
+    if (config.provider === "mock") {
+      return true;
+    }
+
+    if (config.provider === "lmstudio") {
+      return Boolean(config.baseUrl?.trim()) && Boolean(config.model?.trim());
+    }
+
+    return Boolean(config.apiKey);
+  });
+
+  if (configs.length === 0 || runnableConfigs.length === 0) {
     throw new ChatRequestError(
-      "No configured chat provider key is available for this environment.",
+      "No configured chat provider is available for this environment.",
       503,
       "provider_config_missing",
       {
         providerChain: configs.map((config) => ({
           provider: config.provider,
           model: config.model,
+          baseUrl: config.baseUrl || null,
           apiKeySource: config.apiKeySource || null,
           hasApiKey: Boolean(config.apiKey),
+          runnable: config.provider === "mock"
+            ? true
+            : config.provider === "lmstudio"
+              ? Boolean(config.baseUrl?.trim()) && Boolean(config.model?.trim())
+              : Boolean(config.apiKey),
         })),
       },
     );
@@ -415,7 +265,7 @@ function classifyProviderFailure(message: string): ProviderFailureClass {
 
 async function generateWithFallback(
   providerConfigs: LlmProviderRuntimeConfig[],
-  input: Parameters<ReturnType<typeof createLlmProvider>["generate"]>[0],
+  input: ChatCompletionInput,
 ) {
   const diagnostics: ProviderFailureDiagnostic[] = [];
 
@@ -426,14 +276,14 @@ async function generateWithFallback(
         model: providerConfig.model,
         apiKeySource: providerConfig.apiKeySource || null,
       });
-      const provider = createLlmProvider(providerConfig);
-      const generation = await provider.generate({
+      const provider = createChatModelProvider(providerConfig);
+      const generation = await provider.complete({
         ...input,
         model: providerConfig.model,
       });
 
       console.info("chat_provider_used", {
-        provider: provider.info.name,
+        provider: provider.info.provider,
         model: providerConfig.model,
       });
       return {
@@ -662,7 +512,10 @@ Deno.serve(async (request) => {
     });
     const adminClient = createAdminClient();
 
-    const resolvedConfig = await loadChatRuntimeSettings(adminClient, Deno.env.toObject());
+  const resolvedConfig = await loadChatRuntimeSettings(adminClient, Deno.env.toObject());
+    if (!resolvedConfig.runtime.aiEnabled) {
+      throw new ChatRequestError("AI features are disabled for this workspace.", 403, "ai_disabled");
+    }
     const providerConfig = resolvedConfig.provider;
     const providerChain = [
       providerConfig,
@@ -814,7 +667,7 @@ Deno.serve(async (request) => {
         outputTokens: generation.usage?.outputTokens ?? null,
         totalTokens: generation.usage?.totalTokens ?? null,
       };
-      providerName = generationResult.provider.info.name;
+      providerName = generationResult.provider.info.provider;
       modelName = generationResult.providerConfig.model;
 
       groundedPayload = generation.structuredOutput || {

@@ -83,6 +83,12 @@ describe("search-index-service", () => {
           cacheHit: false,
           cacheKey: "sqe_test",
           effectiveMode: "concat",
+          reindexRequired: true,
+          embeddingConfigFingerprint: "fp_active",
+          indexedConfigFingerprint: "fp_active",
+          selectedEmbeddingConfigFingerprint: "fp_selected",
+          activeEmbeddingGenerationId: "gen-active",
+          selectedEmbeddingGenerationId: "gen-selected",
         },
       },
       error: null,
@@ -111,6 +117,12 @@ describe("search-index-service", () => {
     expect(response.debug).toMatchObject({
       cacheHit: false,
       effectiveMode: "concat",
+      reindexRequired: true,
+      embeddingConfigFingerprint: "fp_active",
+      indexedConfigFingerprint: "fp_active",
+      selectedEmbeddingConfigFingerprint: "fp_selected",
+      activeEmbeddingGenerationId: "gen-active",
+      selectedEmbeddingGenerationId: "gen-selected",
     });
   });
 });

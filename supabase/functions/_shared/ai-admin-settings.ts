@@ -25,6 +25,7 @@ export async function loadAiRuntimeRows(adminClient: AiSettingsLookupClient | nu
     adminClient
       .from("app_settings")
       .select([
+        "chat_ai_enabled",
         "chat_llm_provider",
         "chat_llm_model",
         "chat_llm_base_url",
@@ -35,6 +36,19 @@ export async function loadAiRuntimeRows(adminClient: AiSettingsLookupClient | nu
         "embedding_fallback_model",
         "embedding_fallback_base_url",
         "embedding_vector_dimensions",
+        "embedding_schema_dimensions",
+        "embedding_reindex_required",
+        "embedding_last_indexed_fingerprint",
+        "embedding_last_indexed_at",
+        "active_embedding_provider",
+        "active_embedding_model",
+        "active_embedding_base_url",
+        "active_embedding_vector_dimensions",
+        "active_embedding_schema_dimensions",
+        "active_embedding_generation_id",
+        "active_embedding_fingerprint",
+        "active_embedding_activated_at",
+        "embedding_pending_generation_id",
       ].join(","))
       .eq("id", 1)
       .maybeSingle(),

@@ -49,6 +49,7 @@ vi.mock("@/lib/chat/chat-service", () => ({
 
 vi.mock("@/lib/chat-admin-settings-service", () => ({
   defaultChatRuntimeSettings: () => ({
+    aiEnabled: true,
     enableSimilarityExpansion: true,
     strictCitationsDefault: true,
     historyMessageLimit: 12,
@@ -64,6 +65,7 @@ vi.mock("@/lib/chat-admin-settings-service", () => ({
     allowClarificationQuestions: true,
   }),
   fetchChatRuntimeSettings: vi.fn().mockResolvedValue({
+    aiEnabled: true,
     enableSimilarityExpansion: true,
     strictCitationsDefault: true,
     historyMessageLimit: 12,
@@ -190,5 +192,24 @@ describe("ChatPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByText(/Request ID: req-123/i)).toBeInTheDocument();
+  });
+
+  it("disables chat when AI is disabled in runtime settings", async () => {
+    const { fetchChatRuntimeSettings } = await import("@/lib/chat-admin-settings-service");
+    (fetchChatRuntimeSettings as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      aiEnabled: false,
+      enableSimilarityExpansion: true,
+      strictCitationsDefault: true,
+      historyMessageLimit: 12,
+      maxEvidenceItems: 6,
+      answerTemperature: 0.2,
+      maxAnswerTokens: 700,
+    });
+
+    await renderChatPage();
+
+    expect(await screen.findByText("Grounded Chat")).toBeInTheDocument();
+    expect(await screen.findByText(/AI features are disabled/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 });
