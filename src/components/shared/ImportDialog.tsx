@@ -41,7 +41,17 @@ const iconByFormat: Record<string, React.ElementType> = {
 export function ImportDialog({ open, onOpenChange, ontologyId, ontologyTitle, onImport }: ImportDialogProps) {
   const { role } = useAuth();
   const formats = ImportFactory.getAll();
-  const accept = formats.flatMap((format) => format.extensions).join(",");
+  // Build accept string with proper formatting and MIME types for better browser support
+  const accept = [
+    ...formats.flatMap((format) => format.extensions),
+    // Add common MIME types for semantic/RDF files
+    "text/turtle",
+    "application/rdf+xml",
+    "application/ld+json",
+    "text/plain",
+    "application/json",
+    "application/xml",
+  ].join(",");
   const [selectedFormat, setSelectedFormat] = useState(formats[0]?.format || "csv");
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);

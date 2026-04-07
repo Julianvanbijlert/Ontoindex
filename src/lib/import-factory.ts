@@ -617,10 +617,8 @@ function buildRowFromRecord(rawRow: Record<string, unknown>, rowNumber: number, 
     return null;
   }
 
-  if (!description && !content) {
-    warnings.push(`Row ${rowNumber} was skipped because description or context is required.`);
-    return null;
-  }
+  // Allow rows with only a title; generate a default description if needed
+  const finalDescription = description || content || `Imported from ${title}`;
 
   const priorityResult = normalizePriority(String(normalized.priority ?? ""));
   const statusResult = normalizeStatus(String(normalized.status ?? ""));
@@ -649,7 +647,7 @@ function buildRowFromRecord(rawRow: Record<string, unknown>, rowNumber: number, 
   return {
     externalId: externalId || String(normalized.id ?? normalized["@id"] ?? title),
     title,
-    description,
+    description: finalDescription,
     content,
     example,
     tags: splitTags(normalized.tags ?? normalized.tag ?? normalized.altlabel ?? []),
@@ -785,9 +783,9 @@ function parseTurtle(text: string) {
   const prefixes = text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.startsWith("@prefix"))
+    .filter((line) => line.startsWith("@prefix") || line.startsWith("PREFIX"))
     .reduce<Record<string, string>>((accumulator, line) => {
-      const match = line.match(/^@prefix\s+([A-Za-z][\w-]*):\s*<([^>]+)>\s*\.$/);
+      const match = line.match(/^(?:@)?prefix\s+([A-Za-z][\w-]*):\s*<([^>]+)>\s*\.?$/i);
 
       if (match) {
         accumulator[match[1]] = match[2];
@@ -797,8 +795,8 @@ function parseTurtle(text: string) {
     }, { ...prefixMap });
   const triples: ImportedTriple[] = [];
   const blocks = text
-    .replace(/^@prefix.*$/gm, "")
-    .split(/\.\s*(?=<|$)/)
+    .replace(/^(?:@)?prefix.*$/gm, "")
+    .split(/\.\s*(?=<|[a-zA-Z_][a-zA-Z0-9_-]*:|$)/m)
     .map((block) => block.trim())
     .filter(Boolean);
 
