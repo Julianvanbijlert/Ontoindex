@@ -1,1 +1,0 @@
-ALTER TABLE public.definitions ADD COLUMN IF NOT EXISTS example text;

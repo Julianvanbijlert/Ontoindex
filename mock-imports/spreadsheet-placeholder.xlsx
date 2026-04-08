@@ -1,4 +1,0 @@
-This is a placeholder .xlsx file for testing the current import dialog.
-The app currently rejects Excel imports before parsing file contents,
-so the extension is enough to exercise that code path.
-

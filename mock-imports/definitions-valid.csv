@@ -1,5 +1,0 @@
-title,description,status,priority
-User Authentication,Definition for login and session handling,approved,high
-Ontology Mapping,Maps terms between external vocabularies,in-review,medium
-Search Index,Defines how indexed concepts are stored,draft,low
-
